@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Codes Portails Livreur</title>
-  <link rel="manifest" href="manifest.json">
+  <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#1e293b">
   <style>
     * { 
@@ -110,9 +110,12 @@
     .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; padding: 20px; z-index: 30; }
     .modal-content { background: #1e293b; padding: 20px; border-radius: 12px; width: 100%; max-width: 400px; }
     .modal-content input { width: 100%; padding: 12px; margin: 8px 0 16px; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 8px; font-size: 16px; }
-    .modal-btns { display: flex; justify-content: flex-end; gap: 10px; }
-    .btn-cancel { background: #475569; color: white; border: none; padding: 10px 16px; border-radius: 6px; font-size: 15px; cursor: pointer; }
-    .btn-save { background: #0284c7; color: white; border: none; padding: 10px 16px; border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; }
+    
+    .modal-btns { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; }
+    .modal-btns-right { display: flex; gap: 8px; margin-left: auto; }
+    .btn-cancel { background: #475569; color: white; border: none; padding: 10px 14px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+    .btn-save { background: #0284c7; color: white; border: none; padding: 10px 14px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .btn-delete { background: #dc2626; color: white; border: none; padding: 10px 14px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; display: none; }
 
     #toast {
       visibility: hidden;
@@ -165,7 +168,7 @@
     <div style="font-size: 40px; margin-bottom: 10px;">📲</div>
     <h3 style="font-size: 18px; margin-bottom: 8px;">Installer l'application ?</h3>
     <p style="font-size: 14px; color: #94a3b8; margin-bottom: 20px; line-height: 1.4;">
-      Ajoutez <strong>Codes Portails</strong> sur votre écran d'accueil pour y accéder en 1 clic sans passer par le navigateur.
+      Ajoutez <strong>Codes Portails</strong> sur votre écran d'accueil pour un accès instantané en tournée.
     </p>
     <div class="modal-btns" style="justify-content: center; gap: 12px;">
       <button class="btn-cancel" id="dismissInstallPopup">Plus tard</button>
@@ -181,9 +184,13 @@
     <input type="text" id="modalAddress">
     <label style="font-size: 13px; color: #94a3b8;">Code</label>
     <input type="text" id="modalCode">
+    
     <div class="modal-btns">
-      <button class="btn-cancel" id="cancelModal">Annuler</button>
-      <button class="btn-save" id="saveModal">Sauvegarder pour tous</button>
+      <button class="btn-delete" id="deleteBtn">🗑️ Supprimer</button>
+      <div class="modal-btns-right">
+        <button class="btn-cancel" id="cancelModal">Annuler</button>
+        <button class="btn-save" id="saveModal">Sauvegarder</button>
+      </div>
     </div>
   </div>
 </div>
@@ -191,6 +198,10 @@
 <div id="toast"></div>
 
 <script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
 let records = [];
 let editingIndex = null;
 let toastTimeout;
@@ -206,6 +217,7 @@ const editModal = document.getElementById('editModal');
 const modalAddress = document.getElementById('modalAddress');
 const modalCode = document.getElementById('modalCode');
 const modalTitle = document.getElementById('modalTitle');
+const deleteBtn = document.getElementById('deleteBtn');
 const toast = document.getElementById('toast');
 const installBtn = document.getElementById('installBtn');
 const installPopupModal = document.getElementById('installPopupModal');
@@ -213,7 +225,6 @@ const confirmInstallPopup = document.getElementById('confirmInstallPopup');
 const dismissInstallPopup = document.getElementById('dismissInstallPopup');
 const filterRecentBtn = document.getElementById('filterRecentBtn');
 
-// Gestion du format d'affichage de la date
 function formatUpdateDate(ts) {
   if (!ts) return null;
   const now = Date.now();
@@ -230,17 +241,15 @@ function formatUpdateDate(ts) {
 
 function isUpdatedRecently(ts) {
   if (!ts) return false;
-  return (Date.now() - ts) < (7 * 24 * 60 * 60 * 1000); // 7 jours
+  return (Date.now() - ts) < (7 * 24 * 60 * 60 * 1000);
 }
 
-// Toggle filtre récents
 filterRecentBtn.addEventListener('click', () => {
   filterRecentOnly = !filterRecentOnly;
   filterRecentBtn.classList.toggle('active', filterRecentOnly);
   renderList();
 });
 
-// Installation PWA
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
@@ -366,9 +375,16 @@ window.copyCode = function(val) {
 
 window.openEdit = function(idx) {
   editingIndex = idx;
+  const item = records[idx];
   modalTitle.textContent = "Modifier l'adresse";
-  modalAddress.value = records[idx].a;
-  modalCode.value = records[idx].c;
+  modalAddress.value = item.a;
+  modalCode.value = item.c;
+
+  // Condition 24h uniquement sur les nouveaux ajouts
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+  const isDeletable = item.created && (Date.now() - item.created < ONE_DAY_MS);
+  
+  deleteBtn.style.display = isDeletable ? 'block' : 'none';
   editModal.style.display = 'flex';
 };
 
@@ -377,11 +393,25 @@ document.getElementById('openAddModal').addEventListener('click', () => {
   modalTitle.textContent = "Ajouter un code";
   modalAddress.value = '';
   modalCode.value = '';
+  deleteBtn.style.display = 'none';
   editModal.style.display = 'flex';
 });
 
 document.getElementById('cancelModal').addEventListener('click', () => {
   editModal.style.display = 'none';
+});
+
+deleteBtn.addEventListener('click', async () => {
+  if (editingIndex === null) return;
+  const item = records[editingIndex];
+  if (confirm(`Supprimer définitivement "${item.a}" ?`)) {
+    records.splice(editingIndex, 1);
+    editModal.style.display = 'none';
+    await syncToServer();
+    toast.textContent = 'Adresse supprimée';
+    toast.className = 'show';
+    setTimeout(() => { toast.className = ''; }, 1500);
+  }
 });
 
 document.getElementById('saveModal').addEventListener('click', async () => {
@@ -392,9 +422,21 @@ document.getElementById('saveModal').addEventListener('click', async () => {
   const now = Date.now();
 
   if (editingIndex !== null) {
-    records[editingIndex] = { a, c, u: now };
+    // Mise à jour : conserve la date de création originale s'il y en a une
+    records[editingIndex] = { 
+      ...records[editingIndex],
+      a, 
+      c, 
+      u: now 
+    };
   } else {
-    records.unshift({ a, c, u: now });
+    // Nouvel enregistrement : enregistre le timestamp de création
+    records.unshift({ 
+      a, 
+      c, 
+      u: now, 
+      created: now 
+    });
   }
 
   editModal.style.display = 'none';
