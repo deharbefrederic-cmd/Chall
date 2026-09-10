@@ -134,7 +134,8 @@ function renderList() {
 
   const filtered = records.filter(item => {
     if (!terms.length) return true;
-    const target = normalize((item.a || '') + " " + (item.c || ''));
+    // Recherche uniquement dans l'adresse, les codes sont exclus de la recherche
+    const target = normalize(item.a || '');
     return terms.every(term => target.includes(term));
   });
 
@@ -158,6 +159,7 @@ function renderList() {
     codeList.appendChild(card);
   });
 }
+
 
 window.copyCode = function(val) {
   navigator.clipboard.writeText(val);
