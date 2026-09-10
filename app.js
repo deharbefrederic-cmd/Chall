@@ -28,7 +28,6 @@ const confirmInstallPopup = document.getElementById('confirmInstallPopup');
 const dismissInstallPopup = document.getElementById('dismissInstallPopup');
 const filterRecentBtn = document.getElementById('filterRecentBtn');
 
-// Gestion des suppressions réservées au créateur (24h)
 function getMyCreatedIds() {
   try {
     return JSON.parse(localStorage.getItem('chall_my_creations') || '[]');
@@ -47,79 +46,43 @@ function clean(str) {
   return (str || '').trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
-// Normalisation intelligente pour comparer les adresses
-function standardizeAddress(str) {
+// Nettoie le type de voie pour ne garder que le cœur de l'adresse (ex: "11 avenue valentiny" -> "11 valentiny")
+function extractCoreAddress(str) {
   let s = clean(str);
-  return s.replace(/\bav\b|\bave\b/g, 'avenue')
-          .replace(/\bbd\b|\bblvd\b/g, 'boulevard')
-          .replace(/\bche\b|\bch\b/g, 'chemin')
-          .replace(/\br\b/g, 'rue')
-          .replace(/\bst\b/g, 'saint')
-          .replace(/\bste\b/g, 'sainte')
-          .replace(/\bimp\b/g, 'impasse')
-          .replace(/[^a-z0-9]/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim();
+  s = s.replace(/\b(avenue|ave|av|boulevard|bd|blvd|rue|r|chemin|che|ch|impasse|imp|route|rte|traverse|allee|place|cours|montee|vieux chemin)\b/g, ' ');
+  s = s.replace(/[^a-z0-9]/g, ' ');
+  return s.replace(/\s+/g, ' ').trim();
 }
 
-// Calcul de la distance d'édition entre deux textes
-function levenshtein(a, b) {
-  const m = a.length, n = b.length;
-  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      if (a[i - 1] === b[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1];
-      } else {
-        dp[i][j] = 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-      }
-    }
-  }
-  return dp[m][n];
-}
-
-// Détecteur de doublons
+// Détection robuste des doublons
 function findSimilarAddress(newAddr, currentIndex = null) {
-  const stdNew = standardizeAddress(newAddr);
-  const numbersNew = (stdNew.match(/\d+/g) || []).join('-');
+  const coreNew = extractCoreAddress(newAddr);
+  const numNew = (coreNew.match(/\d+/) || [''])[0];
+  const wordsNew = coreNew.split(' ').filter(w => w !== numNew && w.length >= 2);
 
   for (let i = 0; i < records.length; i++) {
     if (currentIndex !== null && i === currentIndex) continue;
 
     const existing = records[i];
-    const stdExisting = standardizeAddress(existing.a);
-    const numbersExisting = (stdExisting.match(/\d+/g) || []).join('-');
+    const coreExisting = extractCoreAddress(existing.a);
+    const numExisting = (coreExisting.match(/\d+/) || [''])[0];
 
-    // Si les numéros d'immeuble diffèrent (ex: 12 vs 14), ce ne sont pas des doublons
-    if (numbersNew && numbersExisting && numbersNew !== numbersExisting) {
+    // Si les deux ont un numéro et qu'il est différent (ex: 10 vs 11), ce n'est pas un doublon
+    if (numNew && numExisting && numNew !== numExisting) {
       continue;
     }
 
-    // 1. Égalité parfaite après normalisation
-    if (stdNew === stdExisting) {
-      return existing;
+    // 1. Égalité parfaite du cœur de l'adresse (ex: "11 valentiny" === "11 valentiny")
+    if (coreNew === coreExisting) {
+      return { item: existing, index: i };
     }
 
-    // 2. Différence de quelques caractères (faute de frappe)
-    const maxLen = Math.max(stdNew.length, stdExisting.length);
-    if (maxLen > 4) {
-      const dist = levenshtein(stdNew, stdExisting);
-      const similarity = 1 - (dist / maxLen);
-      if (dist <= 2 || similarity >= 0.82) {
-        return existing;
-      }
-    }
-
-    // 3. Inclusion de mots clés significatifs (ex: "12 miltat" vs "12 avenue miltat")
-    const wordsNew = stdNew.split(' ').filter(w => w.length > 2);
-    const wordsExisting = stdExisting.split(' ').filter(w => w.length > 2);
-    if (wordsNew.length >= 2 && wordsExisting.length >= 2) {
-      const common = wordsNew.filter(w => wordsExisting.includes(w));
-      if (common.length >= Math.min(wordsNew.length, wordsExisting.length)) {
-        return existing;
+    // 2. Même numéro et même nom de rue principal
+    const wordsExisting = coreExisting.split(' ').filter(w => w !== numExisting && w.length >= 2);
+    if (numNew && numNew === numExisting && wordsNew.length > 0 && wordsExisting.length > 0) {
+      const match = wordsNew.some(w => wordsExisting.includes(w));
+      if (match) {
+        return { item: existing, index: i };
       }
     }
   }
@@ -141,7 +104,6 @@ filterRecentBtn.addEventListener('click', () => {
   renderList();
 });
 
-// Installation PWA
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
@@ -211,8 +173,13 @@ function renderList() {
     return terms.every(t => target.includes(t));
   });
 
+  // Tri de la liste
   if (filterRecentOnly) {
+    // Mode récents : du plus récent au plus ancien
     filtered.sort((x, y) => (y.u || 0) - (x.u || 0));
+  } else {
+    // Mode général : tri naturel (alphabétique et numérique 1, 2, 10, 11...)
+    filtered.sort((x, y) => (x.a || '').localeCompare(y.a || '', 'fr', { numeric: true, sensitivity: 'base' }));
   }
 
   itemCount.textContent = `${filtered.length} résultat(s)`;
@@ -319,30 +286,53 @@ deleteBtn.addEventListener('click', async () => {
   }
 });
 
-// Sauvegarde avec détection de doublons
+// Sauvegarde avec proposition de fusion
 saveBtn.addEventListener('click', async () => {
   if (isSaving) return;
   const a = modalAddress.value.trim();
   const c = modalCode.value.trim();
   if (!a || !c) return alert("Remplissez l'adresse et le code.");
 
-  // Vérification de doublon potentiel
-  const duplicate = findSimilarAddress(a, editingIndex);
-  if (duplicate) {
-    const confirmMessage = `⚠️ Doublon potentiel détecté !\n\nUne adresse très proche existe déjà :\n👉 "${duplicate.a}" (Code : ${duplicate.c})\n\nSouhaitez-vous quand même enregistrer "${a}" ?`;
-    if (!confirm(confirmMessage)) {
-      return; // Annule l'enregistrement si l'utilisateur refuse
+  const now = Date.now();
+
+  // Détection lors d'un nouvel ajout
+  if (editingIndex === null) {
+    const match = findSimilarAddress(a);
+    if (match) {
+      const existing = match.item;
+      const updateExisting = confirm(
+        `⚠️ Adresse similaire trouvée !\n\n` +
+        `"${existing.a}" existe déjà avec le code : ${existing.c}\n\n` +
+        `Voulez-vous METTRE À JOUR son code avec "${c}" plutôt que de créer un doublon ?\n\n` +
+        `• Cliquez sur OK pour mettre à jour la fiche existante.\n` +
+        `• Cliquez sur Annuler pour créer une fiche séparée.`
+      );
+
+      if (updateExisting) {
+        // Fusion : on met à jour la fiche existante
+        isSaving = true;
+        saveBtn.disabled = true;
+        existing.c = c;
+        existing.u = now;
+        existing.hs = false;
+        editModal.style.display = 'none';
+        await syncToServer();
+        saveBtn.disabled = false;
+        isSaving = false;
+        toast.textContent = 'Fiche existante mise à jour !';
+        toast.className = 'show';
+        setTimeout(() => { toast.className = ''; }, 1500);
+        return;
+      }
     }
   }
 
   isSaving = true;
   saveBtn.disabled = true;
-  const now = Date.now();
 
   if (editingIndex !== null) {
     const prev = records[editingIndex];
     const hasCodeChanged = (clean(prev.c) !== clean(c));
-    
     records[editingIndex] = {
       ...prev,
       a,
@@ -353,7 +343,7 @@ saveBtn.addEventListener('click', async () => {
   } else {
     const newId = 'id_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
     recordMyCreation(newId);
-    records.unshift({ 
+    records.push({ 
       id: newId,
       a, 
       c, 
