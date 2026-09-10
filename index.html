@@ -380,13 +380,15 @@ window.openEdit = function(idx) {
   modalAddress.value = item.a;
   modalCode.value = item.c;
 
-  // Condition 24h uniquement sur les nouveaux ajouts
+  // Autorise la suppression si créé OU modifié dans les dernières 24h
   const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-  const isDeletable = item.created && (Date.now() - item.created < ONE_DAY_MS);
+  const lastTouch = item.created || item.u;
+  const isDeletable = lastTouch && (Date.now() - lastTouch < ONE_DAY_MS);
   
   deleteBtn.style.display = isDeletable ? 'block' : 'none';
   editModal.style.display = 'flex';
 };
+
 
 document.getElementById('openAddModal').addEventListener('click', () => {
   editingIndex = null;
