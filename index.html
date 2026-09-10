@@ -115,6 +115,7 @@
     .modal-btns-right { display: flex; gap: 8px; margin-left: auto; }
     .btn-cancel { background: #475569; color: white; border: none; padding: 10px 14px; border-radius: 6px; font-size: 14px; cursor: pointer; }
     .btn-save { background: #0284c7; color: white; border: none; padding: 10px 14px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .btn-save:disabled { opacity: 0.6; cursor: not-allowed; }
     .btn-delete { background: #dc2626; color: white; border: none; padding: 10px 14px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; display: none; }
 
     #toast {
@@ -168,7 +169,7 @@
     <div style="font-size: 40px; margin-bottom: 10px;">📲</div>
     <h3 style="font-size: 18px; margin-bottom: 8px;">Installer l'application ?</h3>
     <p style="font-size: 14px; color: #94a3b8; margin-bottom: 20px; line-height: 1.4;">
-      Ajoutez <strong>Codes Portails</strong> sur votre écran d'accueil pour un accès instantané en tournée.
+      Ajoutez <strong>Codes Portails</strong> sur votre écran d'accueil pour y accéder en 1 clic sans passer par le navigateur.
     </p>
     <div class="modal-btns" style="justify-content: center; gap: 12px;">
       <button class="btn-cancel" id="dismissInstallPopup">Plus tard</button>
@@ -207,6 +208,7 @@ let editingIndex = null;
 let toastTimeout;
 let deferredPrompt = null;
 let filterRecentOnly = false;
+let isSaving = false;
 
 const searchInput = document.getElementById('searchInput');
 const clearBtn = document.getElementById('clearBtn');
@@ -218,6 +220,7 @@ const modalAddress = document.getElementById('modalAddress');
 const modalCode = document.getElementById('modalCode');
 const modalTitle = document.getElementById('modalTitle');
 const deleteBtn = document.getElementById('deleteBtn');
+const saveBtn = document.getElementById('saveModal');
 const toast = document.getElementById('toast');
 const installBtn = document.getElementById('installBtn');
 const installPopupModal = document.getElementById('installPopupModal');
@@ -250,12 +253,15 @@ filterRecentBtn.addEventListener('click', () => {
   renderList();
 });
 
+// Gestion de la PWA et affichage unique de la popup
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
   installBtn.style.display = 'inline-block';
 
-  if (!sessionStorage.getItem('install_popup_dismissed')) {
+  // Ne s'affiche QUE la première fois jamais vue
+  if (!localStorage.getItem('pwa_popup_presented')) {
+    localStorage.setItem('pwa_popup_presented', 'true');
     installPopupModal.style.display = 'flex';
   }
 });
@@ -273,12 +279,16 @@ confirmInstallPopup.addEventListener('click', async () => {
 
 dismissInstallPopup.addEventListener('click', () => {
   installPopupModal.style.display = 'none';
-  sessionStorage.setItem('install_popup_dismissed', 'true');
 });
 
-installBtn.addEventListener('click', () => {
+installBtn.addEventListener('click', async () => {
   if (!deferredPrompt) return;
   deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  if (outcome === 'accepted') {
+    installBtn.style.display = 'none';
+  }
+  deferredPrompt = null;
 });
 
 window.addEventListener('appinstalled', () => {
@@ -388,37 +398,6 @@ window.openEdit = function(idx) {
   editModal.style.display = 'flex';
 };
 
-document.getElementById('saveModal').addEventListener('click', async () => {
-  const a = modalAddress.value.trim();
-  const c = modalCode.value.trim();
-  if (!a || !c) return alert("Remplissez l'adresse et le code.");
-
-  const now = Date.now();
-
-  if (editingIndex !== null) {
-    // Modification : actualise la MAJ (u) mais conserve strictement la date de création
-    records[editingIndex] = { 
-      ...records[editingIndex],
-      a, 
-      c, 
-      u: now 
-    };
-  } else {
-    // Création initiale : fixe l'horodatage de naissance
-    records.unshift({ 
-      a, 
-      c, 
-      u: now, 
-      created: now 
-    });
-  }
-
-  editModal.style.display = 'none';
-  await syncToServer();
-});
-
-
-
 document.getElementById('openAddModal').addEventListener('click', () => {
   editingIndex = null;
   modalTitle.textContent = "Ajouter un code";
@@ -433,27 +412,35 @@ document.getElementById('cancelModal').addEventListener('click', () => {
 });
 
 deleteBtn.addEventListener('click', async () => {
-  if (editingIndex === null) return;
+  if (editingIndex === null || isSaving) return;
   const item = records[editingIndex];
   if (confirm(`Supprimer définitivement "${item.a}" ?`)) {
+    isSaving = true;
     records.splice(editingIndex, 1);
     editModal.style.display = 'none';
     await syncToServer();
     toast.textContent = 'Adresse supprimée';
     toast.className = 'show';
     setTimeout(() => { toast.className = ''; }, 1500);
+    isSaving = false;
   }
 });
 
-document.getElementById('saveModal').addEventListener('click', async () => {
+// Enregistrement sécurisé anti-doublon
+saveBtn.addEventListener('click', async () => {
+  if (isSaving) return;
+
   const a = modalAddress.value.trim();
   const c = modalCode.value.trim();
   if (!a || !c) return alert("Remplissez l'adresse et le code.");
 
+  isSaving = true;
+  saveBtn.disabled = true;
+  saveBtn.textContent = "Envoi...";
+
   const now = Date.now();
 
   if (editingIndex !== null) {
-    // Mise à jour : conserve la date de création originale s'il y en a une
     records[editingIndex] = { 
       ...records[editingIndex],
       a, 
@@ -461,7 +448,6 @@ document.getElementById('saveModal').addEventListener('click', async () => {
       u: now 
     };
   } else {
-    // Nouvel enregistrement : enregistre le timestamp de création
     records.unshift({ 
       a, 
       c, 
@@ -472,6 +458,10 @@ document.getElementById('saveModal').addEventListener('click', async () => {
 
   editModal.style.display = 'none';
   await syncToServer();
+
+  saveBtn.disabled = false;
+  saveBtn.textContent = "Sauvegarder";
+  isSaving = false;
 });
 
 searchInput.addEventListener('input', renderList);
