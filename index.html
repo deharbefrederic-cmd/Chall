@@ -12,13 +12,11 @@
       margin: 0; 
       padding: 0; 
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      /* Bloque la sélection de texte et les reflets bleus au tap */
       -webkit-user-select: none;
       user-select: none;
       -webkit-touch-callout: none;
       -webkit-tap-highlight-color: transparent;
     }
-    /* Autorise la sélection uniquement dans les champs de saisie */
     input {
       -webkit-user-select: text;
       user-select: text;
@@ -78,12 +76,12 @@
       border: none; width: 56px; height: 56px; border-radius: 28px; font-size: 28px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.4); cursor: pointer; display: flex; align-items: center; justify-content: center;
     }
-    .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; padding: 20px; z-index: 20; }
+    .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; padding: 20px; z-index: 30; }
     .modal-content { background: #1e293b; padding: 20px; border-radius: 12px; width: 100%; max-width: 400px; }
     .modal-content input { width: 100%; padding: 12px; margin: 8px 0 16px; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 8px; font-size: 16px; }
     .modal-btns { display: flex; justify-content: flex-end; gap: 10px; }
-    .btn-cancel { background: #475569; color: white; border: none; padding: 10px 16px; border-radius: 6px; }
-    .btn-save { background: #0284c7; color: white; border: none; padding: 10px 16px; border-radius: 6px; }
+    .btn-cancel { background: #475569; color: white; border: none; padding: 10px 16px; border-radius: 6px; font-size: 15px; cursor: pointer; }
+    .btn-save { background: #0284c7; color: white; border: none; padding: 10px 16px; border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; }
 
     #toast {
       visibility: hidden;
@@ -130,6 +128,20 @@
 <div class="list" id="codeList"></div>
 <button class="btn-add" id="openAddModal">+</button>
 
+<div class="modal" id="installPopupModal">
+  <div class="modal-content" style="text-align: center;">
+    <div style="font-size: 40px; margin-bottom: 10px;">📲</div>
+    <h3 style="font-size: 18px; margin-bottom: 8px;">Installer l'application ?</h3>
+    <p style="font-size: 14px; color: #94a3b8; margin-bottom: 20px; line-height: 1.4;">
+      Ajoutez <strong>Codes Portails</strong> sur votre écran d'accueil pour y accéder en 1 clic sans passer par le navigateur.
+    </p>
+    <div class="modal-btns" style="justify-content: center; gap: 12px;">
+      <button class="btn-cancel" id="dismissInstallPopup">Plus tard</button>
+      <button class="btn-save" id="confirmInstallPopup">Installer</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="editModal">
   <div class="modal-content">
     <h3 id="modalTitle">Modifier</h3>
@@ -163,15 +175,24 @@ const modalCode = document.getElementById('modalCode');
 const modalTitle = document.getElementById('modalTitle');
 const toast = document.getElementById('toast');
 const installBtn = document.getElementById('installBtn');
+const installPopupModal = document.getElementById('installPopupModal');
+const confirmInstallPopup = document.getElementById('confirmInstallPopup');
+const dismissInstallPopup = document.getElementById('dismissInstallPopup');
 
-// Gestion de l'installation PWA
+// Détection de la compatibilité d'installation
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
   installBtn.style.display = 'inline-block';
+
+  // Affichage automatique de la popup si elle n'a pas été fermée durant la session
+  if (!sessionStorage.getItem('install_popup_dismissed')) {
+    installPopupModal.style.display = 'flex';
+  }
 });
 
-installBtn.addEventListener('click', async () => {
+confirmInstallPopup.addEventListener('click', async () => {
+  installPopupModal.style.display = 'none';
   if (!deferredPrompt) return;
   deferredPrompt.prompt();
   const { outcome } = await deferredPrompt.userChoice;
@@ -181,8 +202,19 @@ installBtn.addEventListener('click', async () => {
   deferredPrompt = null;
 });
 
+dismissInstallPopup.addEventListener('click', () => {
+  installPopupModal.style.display = 'none';
+  sessionStorage.setItem('install_popup_dismissed', 'true');
+});
+
+installBtn.addEventListener('click', () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+});
+
 window.addEventListener('appinstalled', () => {
   installBtn.style.display = 'none';
+  installPopupModal.style.display = 'none';
   deferredPrompt = null;
 });
 
@@ -207,102 +239,4 @@ async function syncToServer() {
   syncStatus.textContent = "⏳ Envoi...";
   try {
     await fetch('/api/codes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(records)
-    });
-    syncStatus.textContent = "🟢 À jour";
-  } catch (e) {
-    alert("Erreur de synchronisation réseau.");
-    syncStatus.textContent = "⚠️ Échec sync";
-  }
-  renderList();
-}
-
-function renderList() {
-  const query = normalize(searchInput.value.trim());
-  const terms = query.split(/\s+/).filter(Boolean);
-
-  const filtered = records.filter(item => {
-    if (!terms.length) return true;
-    const target = normalize(item.a || '');
-    return terms.every(term => target.includes(term));
-  });
-
-  itemCount.textContent = `${filtered.length} résultat(s)`;
-  codeList.innerHTML = '';
-
-  filtered.forEach((item) => {
-    const originalIdx = records.indexOf(item);
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.innerHTML = `
-      <div class="card-info">
-        <div class="address">${item.a}</div>
-        <div class="code-badge">${item.c}</div>
-      </div>
-      <div class="actions">
-        <button class="btn-action" onclick="copyCode('${(item.c || '').replace(/'/g, "\\'")}')">📋</button>
-        <button class="btn-action" onclick="openEdit(${originalIdx})">✏️</button>
-      </div>
-    `;
-    codeList.appendChild(card);
-  });
-}
-
-window.copyCode = function(val) {
-  navigator.clipboard.writeText(val);
-  toast.textContent = 'Code copié : ' + val;
-  toast.className = 'show';
-  clearTimeout(toastTimeout);
-  toastTimeout = setTimeout(() => {
-    toast.className = '';
-  }, 1500);
-};
-
-window.openEdit = function(idx) {
-  editingIndex = idx;
-  modalTitle.textContent = "Modifier l'adresse";
-  modalAddress.value = records[idx].a;
-  modalCode.value = records[idx].c;
-  editModal.style.display = 'flex';
-};
-
-document.getElementById('openAddModal').addEventListener('click', () => {
-  editingIndex = null;
-  modalTitle.textContent = "Ajouter un code";
-  modalAddress.value = '';
-  modalCode.value = '';
-  editModal.style.display = 'flex';
-});
-
-document.getElementById('cancelModal').addEventListener('click', () => {
-  editModal.style.display = 'none';
-});
-
-document.getElementById('saveModal').addEventListener('click', async () => {
-  const a = modalAddress.value.trim();
-  const c = modalCode.value.trim();
-  if (!a || !c) return alert("Remplissez l'adresse et le code.");
-
-  if (editingIndex !== null) {
-    records[editingIndex] = { a, c };
-  } else {
-    records.unshift({ a, c });
-  }
-
-  editModal.style.display = 'none';
-  await syncToServer();
-});
-
-searchInput.addEventListener('input', renderList);
-clearBtn.addEventListener('click', () => {
-  searchInput.value = '';
-  searchInput.focus();
-  renderList();
-});
-
-loadData();
-</script>
-</body>
-</html>
+      method:
