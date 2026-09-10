@@ -28,6 +28,74 @@ const confirmInstallPopup = document.getElementById('confirmInstallPopup');
 const dismissInstallPopup = document.getElementById('dismissInstallPopup');
 const filterRecentBtn = document.getElementById('filterRecentBtn');
 
+// --- Suivi des installations Android / Apple ---
+async function trackDeviceInstallation() {
+  // Ne reporte qu'une seule fois par appareil
+  if (localStorage.getItem('chall_installed_reported')) return;
+
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (!isStandalone) return;
+
+  const ua = navigator.userAgent || '';
+  let platform = null;
+
+  if (/android/i.test(ua)) {
+    platform = 'android';
+  } else if (/iphone|ipad|ipod/i.test(ua)) {
+    platform = 'ios';
+  }
+
+  if (platform) {
+    try {
+      await fetch('/api/stats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform })
+      });
+      localStorage.setItem('chall_installed_reported', 'true');
+    } catch (e) {}
+  }
+}
+
+// Vérification au lancement (fonctionne pour Apple et Android ouverts depuis l'icône)
+trackDeviceInstallation();
+
+// Confirmation directe Android
+window.addEventListener('appinstalled', async () => {
+  installBtn.style.display = 'none';
+  installPopupModal.style.display = 'none';
+  deferredPrompt = null;
+
+  if (!localStorage.getItem('chall_installed_reported')) {
+    try {
+      await fetch('/api/stats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform: 'android' })
+      });
+      localStorage.setItem('chall_installed_reported', 'true');
+    } catch (e) {}
+  }
+});
+
+// --- Menu secret Admin (#stats) ---
+async function checkAdminStatsCommand(val) {
+  if (val.trim().toLowerCase() === '#stats') {
+    searchInput.value = '';
+    renderList();
+    try {
+      const res = await fetch('/api/stats');
+      const data = await res.json();
+      const android = data.android || 0;
+      const ios = data.ios || 0;
+      const total = android + ios;
+      alert(`📊 Statistiques d'installation Challivretou :\n\n🤖 Android : ${android}\n🍏 Apple (iOS) : ${ios}\n\n👥 Total installé : ${total}`);
+    } catch (e) {
+      alert("Impossible de charger les statistiques.");
+    }
+  }
+}
+
 function getMyCreatedIds() {
   try {
     return JSON.parse(localStorage.getItem('chall_my_creations') || '[]');
@@ -46,7 +114,6 @@ function clean(str) {
   return (str || '').trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
-// Nettoie le type de voie pour ne garder que le cœur de l'adresse (ex: "11 avenue valentiny" -> "11 valentiny")
 function extractCoreAddress(str) {
   let s = clean(str);
   s = s.replace(/\b(avenue|ave|av|boulevard|bd|blvd|rue|r|chemin|che|ch|impasse|imp|route|rte|traverse|allee|place|cours|montee|vieux chemin)\b/g, ' ');
@@ -54,7 +121,6 @@ function extractCoreAddress(str) {
   return s.replace(/\s+/g, ' ').trim();
 }
 
-// Détection robuste des doublons
 function findSimilarAddress(newAddr, currentIndex = null) {
   const coreNew = extractCoreAddress(newAddr);
   const numNew = (coreNew.match(/\d+/) || [''])[0];
@@ -67,23 +133,16 @@ function findSimilarAddress(newAddr, currentIndex = null) {
     const coreExisting = extractCoreAddress(existing.a);
     const numExisting = (coreExisting.match(/\d+/) || [''])[0];
 
-    // Si les deux ont un numéro et qu'il est différent (ex: 10 vs 11), ce n'est pas un doublon
-    if (numNew && numExisting && numNew !== numExisting) {
-      continue;
-    }
+    if (numNew && numExisting && numNew !== numExisting) continue;
 
-    // 1. Égalité parfaite du cœur de l'adresse (ex: "11 valentiny" === "11 valentiny")
     if (coreNew === coreExisting) {
       return { item: existing, index: i };
     }
 
-    // 2. Même numéro et même nom de rue principal
     const wordsExisting = coreExisting.split(' ').filter(w => w !== numExisting && w.length >= 2);
     if (numNew && numNew === numExisting && wordsNew.length > 0 && wordsExisting.length > 0) {
       const match = wordsNew.some(w => wordsExisting.includes(w));
-      if (match) {
-        return { item: existing, index: i };
-      }
+      if (match) return { item: existing, index: i };
     }
   }
   return null;
@@ -173,12 +232,9 @@ function renderList() {
     return terms.every(t => target.includes(t));
   });
 
-  // Tri de la liste
   if (filterRecentOnly) {
-    // Mode récents : du plus récent au plus ancien
     filtered.sort((x, y) => (y.u || 0) - (x.u || 0));
   } else {
-    // Mode général : tri naturel (alphabétique et numérique 1, 2, 10, 11...)
     filtered.sort((x, y) => (x.a || '').localeCompare(y.a || '', 'fr', { numeric: true, sensitivity: 'base' }));
   }
 
@@ -286,7 +342,6 @@ deleteBtn.addEventListener('click', async () => {
   }
 });
 
-// Sauvegarde avec proposition de fusion
 saveBtn.addEventListener('click', async () => {
   if (isSaving) return;
   const a = modalAddress.value.trim();
@@ -295,7 +350,6 @@ saveBtn.addEventListener('click', async () => {
 
   const now = Date.now();
 
-  // Détection lors d'un nouvel ajout
   if (editingIndex === null) {
     const match = findSimilarAddress(a);
     if (match) {
@@ -309,7 +363,6 @@ saveBtn.addEventListener('click', async () => {
       );
 
       if (updateExisting) {
-        // Fusion : on met à jour la fiche existante
         isSaving = true;
         saveBtn.disabled = true;
         existing.c = c;
@@ -359,7 +412,11 @@ saveBtn.addEventListener('click', async () => {
   isSaving = false;
 });
 
-searchInput.addEventListener('input', renderList);
+searchInput.addEventListener('input', (e) => {
+  checkAdminStatsCommand(e.target.value);
+  renderList();
+});
+
 clearBtn.addEventListener('click', () => {
   searchInput.value = '';
   searchInput.focus();
