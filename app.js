@@ -114,13 +114,24 @@ async function checkAdminStatsCommand(val) {
       const data = await res.json();
       const android = data.android || 0;
       const ios = data.ios || 0;
-      const total = android + ios;
-      alert(`📊 Statistiques d'installation Challivretou :\n\n🤖 Android : ${android}\n🍏 Apple (iOS) : ${ios}\n\n👥 Total installé : ${total}`);
+      const web = data.web || 0;
+      const totalInstalls = android + ios;
+      const totalGlobal = totalInstalls + web;
+
+      alert(
+        `📊 Statistiques Challivretou :\n\n` +
+        `🤖 Appli Android : ${android}\n` +
+        `🍏 Appli Apple : ${ios}\n` +
+        `📱 Sous-total installés : ${totalInstalls}\n\n` +
+        `🌐 Via URL (sans installation) : ${web}\n\n` +
+        `👥 Total utilisateurs uniques : ${totalGlobal}`
+      );
     } catch (e) {
       alert("Impossible de charger les statistiques.");
     }
   }
 }
+
 
 function getMyCreatedIds() {
   try {
