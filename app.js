@@ -28,7 +28,7 @@ const confirmInstallPopup = document.getElementById('confirmInstallPopup');
 const dismissInstallPopup = document.getElementById('dismissInstallPopup');
 const filterRecentBtn = document.getElementById('filterRecentBtn');
 
-// Gestion des suppressions restreintes au créateur (Option 2)
+// Gestion des suppressions réservées au créateur (24h)
 function getMyCreatedIds() {
   try {
     return JSON.parse(localStorage.getItem('chall_my_creations') || '[]');
@@ -47,6 +47,85 @@ function clean(str) {
   return (str || '').trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
+// Normalisation intelligente pour comparer les adresses
+function standardizeAddress(str) {
+  let s = clean(str);
+  return s.replace(/\bav\b|\bave\b/g, 'avenue')
+          .replace(/\bbd\b|\bblvd\b/g, 'boulevard')
+          .replace(/\bche\b|\bch\b/g, 'chemin')
+          .replace(/\br\b/g, 'rue')
+          .replace(/\bst\b/g, 'saint')
+          .replace(/\bste\b/g, 'sainte')
+          .replace(/\bimp\b/g, 'impasse')
+          .replace(/[^a-z0-9]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+}
+
+// Calcul de la distance d'édition entre deux textes
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1];
+      } else {
+        dp[i][j] = 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      }
+    }
+  }
+  return dp[m][n];
+}
+
+// Détecteur de doublons
+function findSimilarAddress(newAddr, currentIndex = null) {
+  const stdNew = standardizeAddress(newAddr);
+  const numbersNew = (stdNew.match(/\d+/g) || []).join('-');
+
+  for (let i = 0; i < records.length; i++) {
+    if (currentIndex !== null && i === currentIndex) continue;
+
+    const existing = records[i];
+    const stdExisting = standardizeAddress(existing.a);
+    const numbersExisting = (stdExisting.match(/\d+/g) || []).join('-');
+
+    // Si les numéros d'immeuble diffèrent (ex: 12 vs 14), ce ne sont pas des doublons
+    if (numbersNew && numbersExisting && numbersNew !== numbersExisting) {
+      continue;
+    }
+
+    // 1. Égalité parfaite après normalisation
+    if (stdNew === stdExisting) {
+      return existing;
+    }
+
+    // 2. Différence de quelques caractères (faute de frappe)
+    const maxLen = Math.max(stdNew.length, stdExisting.length);
+    if (maxLen > 4) {
+      const dist = levenshtein(stdNew, stdExisting);
+      const similarity = 1 - (dist / maxLen);
+      if (dist <= 2 || similarity >= 0.82) {
+        return existing;
+      }
+    }
+
+    // 3. Inclusion de mots clés significatifs (ex: "12 miltat" vs "12 avenue miltat")
+    const wordsNew = stdNew.split(' ').filter(w => w.length > 2);
+    const wordsExisting = stdExisting.split(' ').filter(w => w.length > 2);
+    if (wordsNew.length >= 2 && wordsExisting.length >= 2) {
+      const common = wordsNew.filter(w => wordsExisting.includes(w));
+      if (common.length >= Math.min(wordsNew.length, wordsExisting.length)) {
+        return existing;
+      }
+    }
+  }
+  return null;
+}
+
 function formatUpdateDate(ts) {
   if (!ts) return null;
   const diffDays = Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
@@ -56,7 +135,6 @@ function formatUpdateDate(ts) {
   return new Date(ts).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
 }
 
-// Filtre Récents
 filterRecentBtn.addEventListener('click', () => {
   filterRecentOnly = !filterRecentOnly;
   filterRecentBtn.classList.toggle('active', filterRecentOnly);
@@ -95,7 +173,6 @@ installBtn.addEventListener('click', async () => {
   deferredPrompt = null;
 });
 
-// Chargement & Synchronisation
 async function loadData() {
   try {
     const res = await fetch('/api/codes');
@@ -123,7 +200,6 @@ async function syncToServer() {
   renderList();
 }
 
-// Rendu visuel
 function renderList() {
   const query = clean(searchInput.value);
   const terms = query.split(/\s+/).filter(Boolean);
@@ -169,7 +245,6 @@ function renderList() {
   });
 }
 
-// Copie du code
 window.copyCode = function(val) {
   navigator.clipboard.writeText(val);
   toast.textContent = 'Code copié : ' + val;
@@ -178,7 +253,6 @@ window.copyCode = function(val) {
   toastTimeout = setTimeout(() => { toast.className = ''; }, 1500);
 };
 
-// Ouverture modal d'édition
 window.openEdit = function(idx) {
   editingIndex = idx;
   const item = records[idx];
@@ -186,13 +260,11 @@ window.openEdit = function(idx) {
   modalAddress.value = item.a;
   modalCode.value = item.c;
 
-  // Option 2 : Supprimable UNIQUEMENT par le créateur sur son appareil sous 24h
   const myCreations = getMyCreatedIds();
   const isMine = item.id && myCreations.includes(item.id);
   const isUnder24h = item.created && (Date.now() - item.created < 24 * 60 * 60 * 1000);
   deleteBtn.style.display = (isMine && isUnder24h) ? 'block' : 'none';
 
-  // Option 3 : Bouton Code HS
   hsToggleBtn.style.display = 'block';
   if (item.hs) {
     hsToggleBtn.textContent = '✅ Code valide';
@@ -205,7 +277,6 @@ window.openEdit = function(idx) {
   editModal.style.display = 'flex';
 };
 
-// Modal Ajout
 document.getElementById('openAddModal').addEventListener('click', () => {
   editingIndex = null;
   modalTitle.textContent = "Ajouter un code";
@@ -220,7 +291,6 @@ document.getElementById('cancelModal').addEventListener('click', () => {
   editModal.style.display = 'none';
 });
 
-// Action Code HS
 hsToggleBtn.addEventListener('click', async () => {
   if (editingIndex === null || isSaving) return;
   isSaving = true;
@@ -234,7 +304,6 @@ hsToggleBtn.addEventListener('click', async () => {
   isSaving = false;
 });
 
-// Action Supprimer (Option 2)
 deleteBtn.addEventListener('click', async () => {
   if (editingIndex === null || isSaving) return;
   const item = records[editingIndex];
@@ -250,12 +319,21 @@ deleteBtn.addEventListener('click', async () => {
   }
 });
 
-// Action Sauvegarder
+// Sauvegarde avec détection de doublons
 saveBtn.addEventListener('click', async () => {
   if (isSaving) return;
   const a = modalAddress.value.trim();
   const c = modalCode.value.trim();
   if (!a || !c) return alert("Remplissez l'adresse et le code.");
+
+  // Vérification de doublon potentiel
+  const duplicate = findSimilarAddress(a, editingIndex);
+  if (duplicate) {
+    const confirmMessage = `⚠️ Doublon potentiel détecté !\n\nUne adresse très proche existe déjà :\n👉 "${duplicate.a}" (Code : ${duplicate.c})\n\nSouhaitez-vous quand même enregistrer "${a}" ?`;
+    if (!confirm(confirmMessage)) {
+      return; // Annule l'enregistrement si l'utilisateur refuse
+    }
+  }
 
   isSaving = true;
   saveBtn.disabled = true;
@@ -291,7 +369,6 @@ saveBtn.addEventListener('click', async () => {
   isSaving = false;
 });
 
-// Recherche et effacement
 searchInput.addEventListener('input', renderList);
 clearBtn.addEventListener('click', () => {
   searchInput.value = '';
