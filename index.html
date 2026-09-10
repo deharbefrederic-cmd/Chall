@@ -380,14 +380,43 @@ window.openEdit = function(idx) {
   modalAddress.value = item.a;
   modalCode.value = item.c;
 
-  // Autorise la suppression si créé OU modifié dans les dernières 24h
+  // Supprimable UNIQUEMENT si créée il y a moins de 24h
   const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-  const lastTouch = item.created || item.u;
-  const isDeletable = lastTouch && (Date.now() - lastTouch < ONE_DAY_MS);
+  const isDeletable = Boolean(item.created && (Date.now() - item.created < ONE_DAY_MS));
   
   deleteBtn.style.display = isDeletable ? 'block' : 'none';
   editModal.style.display = 'flex';
 };
+
+document.getElementById('saveModal').addEventListener('click', async () => {
+  const a = modalAddress.value.trim();
+  const c = modalCode.value.trim();
+  if (!a || !c) return alert("Remplissez l'adresse et le code.");
+
+  const now = Date.now();
+
+  if (editingIndex !== null) {
+    // Modification : actualise la MAJ (u) mais conserve strictement la date de création
+    records[editingIndex] = { 
+      ...records[editingIndex],
+      a, 
+      c, 
+      u: now 
+    };
+  } else {
+    // Création initiale : fixe l'horodatage de naissance
+    records.unshift({ 
+      a, 
+      c, 
+      u: now, 
+      created: now 
+    });
+  }
+
+  editModal.style.display = 'none';
+  await syncToServer();
+});
+
 
 
 document.getElementById('openAddModal').addEventListener('click', () => {
