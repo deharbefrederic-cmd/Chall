@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Codes Portails Livreur</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#1e293b">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: #0f172a; color: #f8fafc; padding: 12px; padding-bottom: 80px; }
+    header { position: sticky; top: 0; background: #0f172a; padding: 8px 0; z-index: 10; }
+    .search-box { position: relative; width: 100%; }
+    input[type="search"] {
+      width: 100%; padding: 16px 44px 16px 16px; font-size: 18px; border-radius: 12px;
+      border: 2px solid #334155; background: #1e293b; color: #fff; outline: none;
+    }
+    input[type="search"]:focus { border-color: #38bdf8; }
+    .clear-btn {
+      position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+      background: #475569; border: none; color: white; border-radius: 50%; width: 26px; height: 26px; cursor: pointer;
+    }
+    .count { font-size: 13px; color: #94a3b8; margin: 8px 4px; }
+    .list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+    .card {
+      background: #1e293b; border-radius: 10px; padding: 12px 14px; display: flex;
+      justify-content: space-between; align-items: center; border: 1px solid #334155;
+    }
+    .card-info { flex: 1; padding-right: 10px; }
+    .address { font-size: 16px; font-weight: 600; color: #f1f5f9; }
+    .code-badge {
+      display: inline-block; margin-top: 4px; background: #0284c7; color: white;
+      font-size: 17px; font-weight: 700; padding: 4px 10px; border-radius: 6px; letter-spacing: 0.5px;
+    }
+    .actions { display: flex; gap: 8px; }
+    .btn-action {
+      background: #334155; border: none; color: #cbd5e1; border-radius: 8px;
+      padding: 10px; font-size: 14px; cursor: pointer;
+    }
+    .btn-action:active { background: #475569; }
+    .btn-add {
+      position: fixed; bottom: 16px; right: 16px; background: #0284c7; color: white;
+      border: none; width: 56px; height: 56px; border-radius: 28px; font-size: 28px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4); cursor: pointer; display: flex; align-items: center; justify-content: center;
+    }
+    /* Modal */
+    .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; padding: 20px; z-index: 20; }
+    .modal-content { background: #1e293b; padding: 20px; border-radius: 12px; width: 100%; max-width: 400px; }
+    .modal-content input { width: 100%; padding: 12px; margin: 8px 0 16px; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 8px; font-size: 16px; }
+    .modal-btns { display: flex; justify-content: flex-end; gap: 10px; }
+    .btn-cancel { background: #475569; color: white; border: none; padding: 10px 16px; border-radius: 6px; }
+    .btn-save { background: #0284c7; color: white; border: none; padding: 10px 16px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="search-box">
+    <input type="search" id="searchInput" placeholder="Ex: 10 Gairaut, Cessole, 4 Cyrnos..." autofocus>
+    <button class="clear-btn" id="clearBtn">×</button>
+  </div>
+  <div class="count" id="itemCount">Chargement...</div>
+</header>
+
+<div class="list" id="codeList"></div>
+
+<button class="btn-add" id="openAddModal">+</button>
+
+<div class="modal" id="editModal">
+  <div class="modal-content">
+    <h3 id="modalTitle">Modifier l'adresse</h3>
+    <label style="font-size: 13px; color: #94a3b8;">Adresse / Lieu</label>
+    <input type="text" id="modalAddress">
+    <label style="font-size: 13px; color: #94a3b8;">Code / Instructions</label>
+    <input type="text" id="modalCode">
+    <div class="modal-btns">
+      <button class="btn-cancel" id="cancelModal">Annuler</button>
+      <button class="btn-save" id="saveModal">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const INITIAL_DATA = [
+  { a: "Wc", c: "4950F" },
+  { a: "1215 num enzo", c: "1215" },
+  { a: "Bureaux Carrefour", c: "2305*" },
+  { a: "Avenue Amouroux / Avenue Miltat", c: "753A" },
+  { a: "Parc St Exupéry", c: "2308B" },
+  { a: "1 Avenue Miltat", c: "259A" },
+  { a: "1 Avenue Gravier", c: "1901A" },
+  { a: "2 Avenue Fanny", c: "251B" },
+  { a: "2 Chemin des Jarres", c: "1984" },
+  { a: "2 Rue Prince Maurice", c: "3625A" },
+  { a: "2 Astrid Briand", c: "8588A" },
+  { a: "3 Chemin des Jarres", c: "6532" },
+  { a: "3 Avenue Clément Ader", c: "1106A" },
+  { a: "3 Avenue des Mousquetaires", c: "1966A" },
+  { a: "3 Avenue du Ray", c: "3852" },
+  { a: "3 Avenue Gravier", c: "9632A" },
+  { a: "3 Rue Blasco Ibanez", c: "0354A" },
+  { a: "3 Rue des Roses", c: "4136B" },
+  { a: "4 Avenue Cyrnos", c: "2345 / 857A" },
+  { a: "4 Avenue Julien", c: "4528A" },
+  { a: "4 Rue Paul Bounin", c: "1378" },
+  { a: "4 Rue Blasco Ibanez", c: "1510" },
+  { a: "5 Avenue Clément Ader", c: "2108A" },
+  { a: "5 Rue Général Laperrine Bat. A", c: "8020" },
+  { a: "6 Avenue Lieutenant Charpentier", c: "2496A" },
+  { a: "6 Rue des Chevaliers de Malte", c: "1515#" },
+  { a: "6 Rue Veillon", c: "2112A" },
+  { a: "6/8 Avenue Mireille", c: "6183A" },
+  { a: "6bis Fontaine du Temple", c: "5720A" },
+  { a: "7 Avenue Gravier", c: "27413A" },
+  { a: "7 Avenue Jean de la Fontaine", c: "1789E" },
+  { a: "8 Avenue de Valombrose", c: "3945A" },
+  { a: "8 Avenue Henri Dunant", c: "5743A" },
+  { a: "8 Boulevard Henri Sappia", c: "0369" },
+  { a: "9 Charles Baudelaire esc 2", c: "6404A" },
+  { a: "10 Avenue de Gairaut", c: "2206🔔" },
+  { a: "10B Avenue de Gairaut", c: "3413A" },
+  { a: "10 Chemin Abbaye Saint Pons", c: "6917" },
+  { a: "10 Rue Charles Baudelaire", c: "2468A" },
+  { a: "11 Avenue Mireille", c: "3624A" },
+  { a: "11 Avenue Valentiny", c: "0209A" },
+  { a: "11 Rue Veillon", c: "1939A" },
+  { a: "12 Avenue Notre Dame", c: "4812" },
+  { a: "12 Avenue de Gairaut", c: "2704A" },
+  { a: "12 Rue des Lilas", c: "1871A" },
+  { a: "12 Rue Puget", c: "4011A" },
+  { a: "12bis Rue du Grand Pin", c: "7438A" },
+  { a: "13 Avenue Cyrnos", c: "101571A" },
+  { a: "13 Avenue Sainte Colette", c: "36024A" },
+  { a: "13 Avenue Valentiny", c: "1740A" },
+  { a: "13 Rue Michel Ange", c: "1957" },
+  { a: "14 Boulevard Henri Sappia", c: "1426A" },
+  { a: "14 Rue Puget", c: "198A" },
+  { a: "15 Avenue Alfred Borriglione", c: "1603" },
+  { a: "16 Rue Charles de Foucauld", c: "Iris 1945 / Tulipes 2231*" },
+  { a: "16 Rue Puget", c: "1606" },
+  { a: "16 Rue Charles Baudelaire", c: "0716A" },
+  { a: "17 Avenue de la Marne", c: "1859" },
+  { a: "15-17 Rue Charles de Foucauld", c: "2021" },
+  { a: "19 Avenue de Valombrose", c: "2846A" },
+  { a: "19 Avenue St-Sylvestre", c: "2684A" },
+  { a: "19 Boulevard Gorbella", c: "1951*" },
+  { a: "20 Rue Charles Baudelaire", c: "3026A" },
+  { a: "21 Avenue Caravadossi", c: "1708A" },
+  { a: "21 Avenue Scudéri", c: "1410A" },
+  { a: "22B Avenue Gravier", c: "4810" },
+  { a: "22B Edmond Rostand", c: "1622A" },
+  { a: "23 Avenue Gallin", c: "2408A" },
+  { a: "23 Avenue Scudéri", c: "2346" },
+  { a: "23 Rue Georges Doublet", c: "1789" },
+  { a: "24 Avenue Henry Musso", c: "1956E / 1976" },
+  { a: "25 Avenue de Gairaut", c: "4203A" },
+  { a: "25 Rue Puget", c: "1927A" },
+  { a: "25 Rue Georges Doublet", c: "1808A" },
+  { a: "27 Avenue Alfred de Vigny", c: "1963A" },
+  { a: "27 Avenue Scudéri (Bât C&D)", c: "402719A" },
+  { a: "28 Avenue Alfred Borriglione", c: "1625A" },
+  { a: "28 Rue Édouard Dalmas", c: "6453A" },
+  { a: "28 Vieux Chemin de Gairaut", c: "31050" },
+  { a: "29 Parc Maria", c: "88A" },
+  { a: "30 Vieux Chemin de Gairaut", c: "2374" },
+  { a: "30bis Vieux Chemin de Gairaut", c: "2407A" },
+  { a: "31 Avenue Cap de Croix", c: "1410A" },
+  { a: "31 Boulevard Gorbella", c: "4915A" },
+  { a: "32/34 Vieux Chemin de Gairaut", c: "4269A" },
+  { a: "34 Avenue de Flirey", c: "0201A" },
+  { a: "33 Avenue Georges V", c: "1832#" },
+  { a: "37 Boulevard de Cessole", c: "1120" },
+  { a: "37 Théodore de Banville", c: "1608A" },
+  { a: "39 Boulevard Gorbella", c: "6783A" },
+  { a: "41 Boulevard Gorbella", c: "6783A" },
+  { a: "42 Avenue Caravadossi", c: "1953A" },
+  { a: "42 Boulevard Gorbella", c: "2457" },
+  { a: "43 Boulevard Gorbella", c: "6783A" },
+  { a: "44 Avenue de la Marne", c: "1536A (Bat E: 0307)" },
+  { a: "45 Boulevard Gorbella", c: "6783A" },
+  { a: "50 Boulevard Henri Sappia", c: "4020A" },
+  { a: "53 Avenue du Ray", c: "8170A" },
+  { a: "54 Avenue du Ray", c: "2580" },
+  { a: "55 Boulevard Jean Behra", c: "clé2707clé" },
+  { a: "57 Avenue du Ray", c: "8687*" },
+  { a: "63 Boulevard Henri Sappia", c: "1289A" },
+  { a: "64 Avenue Cap de Croix (Portillon)", c: "2429A" },
+  { a: "66 Avenue St-Barthelemy", c: "2407" },
+  { a: "66 Avenue Cyrnos", c: "6164A" },
+  { a: "64/68 Avenue Cap de Croix", c: "1208 / 1804A" },
+  { a: "68 Avenue St-Barthelemy", c: "1936A" },
+  { a: "69 Boulevard Gorbella", c: "2433A" },
+  { a: "71 Cap de Croix", c: "2020" },
+  { a: "75 Boulevard Jean Behra", c: "1968A" },
+  { a: "79 Boulevard Henri Sappia", c: "1931A" },
+  { a: "80 Avenue Brancolar", c: "6742" },
+  { a: "80 Avenue Cyrille Besset", c: "02020" },
+  { a: "81/83 Boulevard Henri Sappia", c: "4456A" },
+  { a: "83/89/93 Avenue de Rimiez", c: "27931" },
+  { a: "85 Avenue Valrose", c: "4807" },
+  { a: "95 Boulevard de Cessole", c: "4689A" },
+  { a: "103 Avenue Cyrille Besset", c: "7265B" },
+  { a: "105 Avenue Cyrille Besset", c: "2841A" },
+  { a: "107 Avenue Cyrille Besset", c: "2050" },
+  { a: "107 Avenue de Gairaut", c: "6391A" },
+  { a: "107 Avenue de Rimiez", c: "1968A / 6819" },
+  { a: "109 Avenue de Gairaut", c: "1985" },
+  { a: "119 Avenue de Brancolar", c: "774A / 172A" },
+  { a: "134 Avenue de Rimiez", c: "1340 / 2354" },
+  { a: "152 Boulevard Cessole", c: "4769A" },
+  { a: "155/157 Avenue Cyrille Besset", c: "7638" },
+  { a: "156 Avenue de Cessole", c: "0407A" },
+  { a: "164 Boulevard de Cessole", c: "1750" },
+  { a: "170 Avenue de Gairaut", c: "8532A" },
+  { a: "182 Avenue de Gairaut", c: "2408A" },
+  { a: "183 Avenue de Rimiez", c: "2405 / 5137A" },
+  { a: "184 Avenue de Gairaut", c: "0708" },
+  { a: "190 Avenue de Pessicart", c: "4565A" },
+  { a: "184/186 Avenue de Gairaut", c: "5869A" },
+  { a: "186bis Avenue de Pessicart", c: "1030A" },
+  { a: "197 Avenue de Gairaut", c: "2619A" },
+  { a: "242 Avenue de Gairaut", c: "3319A" },
+  { a: "270 Avenue de Pessicart", c: "2307" },
+  { a: "309 Avenue Jules Romains", c: "3112A" }
+];
+
+let records = JSON.parse(localStorage.getItem('delivery_codes')) || INITIAL_DATA;
+let editingIndex = null;
+
+const searchInput = document.getElementById('searchInput');
+const clearBtn = document.getElementById('clearBtn');
+const codeList = document.getElementById('codeList');
+const itemCount = document.getElementById('itemCount');
+const editModal = document.getElementById('editModal');
+const modalAddress = document.getElementById('modalAddress');
+const modalCode = document.getElementById('modalCode');
+const modalTitle = document.getElementById('modalTitle');
+
+function normalize(str) {
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+function renderList() {
+  const query = normalize(searchInput.value.trim());
+  const terms = query.split(/\s+/).filter(Boolean);
+
+  const filtered = records.filter(item => {
+    if (!terms.length) return true;
+    const target = normalize(item.a + " " + item.c);
+    return terms.every(term => target.includes(term));
+  });
+
+  itemCount.textContent = `${filtered.length} résultat(s) trouvé(s)`;
+  codeList.innerHTML = '';
+
+  filtered.forEach((item, idx) => {
+    const originalIdx = records.indexOf(item);
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="card-info">
+        <div class="address">${item.a}</div>
+        <div class="code-badge">${item.c}</div>
+      </div>
+      <div class="actions">
+        <button class="btn-action" onclick="copyCode('${item.c.replace(/'/g, "\\'")}')">📋 Copier</button>
+        <button class="btn-action" onclick="openEdit(${originalIdx})">✏️</button>
+      </div>
+    `;
+    codeList.appendChild(card);
+  });
+}
+
+function saveToStorage() {
+  localStorage.setItem('delivery_codes', JSON.stringify(records));
+  renderList();
+}
+
+window.copyCode = function(val) {
+  navigator.clipboard.writeText(val);
+  alert('Code copié : ' + val);
+};
+
+window.openEdit = function(idx) {
+  editingIndex = idx;
+  modalTitle.textContent = "Modifier l'adresse";
+  modalAddress.value = records[idx].a;
+  modalCode.value = records[idx].c;
+  editModal.style.display = 'flex';
+};
+
+document.getElementById('openAddModal').addEventListener('click', () => {
+  editingIndex = null;
+  modalTitle.textContent = "Ajouter un code";
+  modalAddress.value = '';
+  modalCode.value = '';
+  editModal.style.display = 'flex';
+});
+
+document.getElementById('cancelModal').addEventListener('click', () => {
+  editModal.style.display = 'none';
+});
+
+document.getElementById('saveModal').addEventListener('click', () => {
+  const a = modalAddress.value.trim();
+  const c = modalCode.value.trim();
+  if (!a || !c) return alert("Remplissez l'adresse et le code.");
+
+  if (editingIndex !== null) {
+    records[editingIndex] = { a, c };
+  } else {
+    records.unshift({ a, c });
+  }
+  saveToStorage();
+  editModal.style.display = 'none';
+});
+
+searchInput.addEventListener('input', renderList);
+clearBtn.addEventListener('click', () => {
+  searchInput.value = '';
+  searchInput.focus();
+  renderList();
+});
+
+renderList();
+</script>
+</body>
+</html>
