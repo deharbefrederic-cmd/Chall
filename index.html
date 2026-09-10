@@ -49,6 +49,32 @@
     .modal-btns { display: flex; justify-content: flex-end; gap: 10px; }
     .btn-cancel { background: #475569; color: white; border: none; padding: 10px 16px; border-radius: 6px; }
     .btn-save { background: #0284c7; color: white; border: none; padding: 10px 16px; border-radius: 6px; }
+
+    /* Notification discrète Toast */
+    #toast {
+      visibility: hidden;
+      position: fixed;
+      bottom: 25px;
+      left: 50%;
+      transform: translateX(-50%);
+      background-color: #10b981;
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 15px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+      z-index: 100;
+      opacity: 0;
+      transition: opacity 0.2s, bottom 0.2s;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    #toast.show {
+      visibility: visible;
+      opacity: 1;
+      bottom: 35px;
+    }
   </style>
 </head>
 <body>
@@ -81,9 +107,12 @@
   </div>
 </div>
 
+<div id="toast"></div>
+
 <script>
 let records = [];
 let editingIndex = null;
+let toastTimeout;
 
 const searchInput = document.getElementById('searchInput');
 const clearBtn = document.getElementById('clearBtn');
@@ -94,6 +123,7 @@ const editModal = document.getElementById('editModal');
 const modalAddress = document.getElementById('modalAddress');
 const modalCode = document.getElementById('modalCode');
 const modalTitle = document.getElementById('modalTitle');
+const toast = document.getElementById('toast');
 
 function normalize(str) {
   return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -134,7 +164,6 @@ function renderList() {
 
   const filtered = records.filter(item => {
     if (!terms.length) return true;
-    // Recherche uniquement dans l'adresse, les codes sont exclus de la recherche
     const target = normalize(item.a || '');
     return terms.every(term => target.includes(term));
   });
@@ -160,10 +189,14 @@ function renderList() {
   });
 }
 
-
 window.copyCode = function(val) {
   navigator.clipboard.writeText(val);
-  alert('Code copié : ' + val);
+  toast.textContent = 'Code copié : ' + val;
+  toast.className = 'show';
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => {
+    toast.className = '';
+  }, 1500);
 };
 
 window.openEdit = function(idx) {
