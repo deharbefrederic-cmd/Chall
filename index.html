@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <link rel="apple-touch-icon" href="/logo.png">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Codes Portails Livreur</title>
+  <title>Challivretou</title>
+  <link rel="apple-touch-icon" href="/logo.png">
   <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#1e293b">
+  <meta name="theme-color" content="#0f172a">
   <style>
     * { 
       box-sizing: border-box; margin: 0; padding: 0; 
@@ -16,7 +16,9 @@
     }
     input { -webkit-user-select: text; user-select: text; }
     body { background: #0f172a; color: #f8fafc; padding: 12px; padding-bottom: 80px; }
-    header { position: sticky; top: 0; background: #0f172a; padding: 8px 0; z-index: 10; }
+    header { position: sticky; top: 0; background: #0f172a; padding: 6px 0 10px 0; z-index: 10; }
+    .brand-header { text-align: center; margin-bottom: 8px; }
+    .brand-header img { height: 46px; max-width: 90%; object-fit: contain; }
     .search-box { position: relative; width: 100%; }
     input[type="search"] {
       width: 100%; padding: 16px 44px 16px 16px; font-size: 18px; border-radius: 12px;
@@ -27,7 +29,7 @@
       position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
       background: #475569; border: none; color: white; border-radius: 50%; width: 26px; height: 26px; cursor: pointer;
     }
-    .status-bar { display: flex; justify-content: space-between; align-items: center; margin: 8px 4px; font-size: 13px; color: #94a3b8; }
+    .status-bar { display: flex; justify-content: space-between; align-items: center; margin: 8px 4px 0; font-size: 13px; color: #94a3b8; }
     .status-right { display: flex; align-items: center; gap: 8px; }
     .btn-toggle-recent {
       background: #334155; color: #cbd5e1; border: 1px solid #475569; padding: 4px 8px;
@@ -43,6 +45,7 @@
       background: #1e293b; border-radius: 10px; padding: 12px 14px; display: flex;
       justify-content: space-between; align-items: center; border: 1px solid #334155;
     }
+    .card.is-hs { border-color: #f59e0b; background: #1c1917; }
     .card-info { flex: 1; padding-right: 10px; }
     .address { font-size: 16px; font-weight: 600; color: #f1f5f9; }
     .code-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
@@ -50,16 +53,20 @@
       display: inline-block; background: #0284c7; color: white;
       font-size: 17px; font-weight: 700; padding: 4px 10px; border-radius: 6px; letter-spacing: 0.5px;
     }
-    .badge-recent {
-      background: #065f46; color: #34d399; font-size: 10px; font-weight: 700;
-      padding: 2px 6px; border-radius: 4px; text-transform: uppercase;
+    .code-badge.hs { background: #d97706; }
+    .badge-tag {
+      font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
+      text-transform: uppercase; letter-spacing: 0.5px;
     }
+    .badge-recent { background: #065f46; color: #34d399; }
+    .badge-hs-alert { background: #78350f; color: #fde68a; border: 1px solid #b45309; }
     .updated-date { font-size: 11px; color: #64748b; margin-top: 4px; }
     .actions { display: flex; gap: 8px; }
     .btn-action {
       background: #334155; border: none; color: #cbd5e1; border-radius: 8px;
       padding: 10px; font-size: 14px; cursor: pointer;
     }
+    .btn-action:active { background: #475569; }
     .btn-add {
       position: fixed; bottom: 16px; right: 16px; background: #0284c7; color: white;
       border: none; width: 56px; height: 56px; border-radius: 28px; font-size: 28px;
@@ -68,11 +75,13 @@
     .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; padding: 20px; z-index: 30; }
     .modal-content { background: #1e293b; padding: 20px; border-radius: 12px; width: 100%; max-width: 400px; }
     .modal-content input { width: 100%; padding: 12px; margin: 8px 0 16px; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 8px; font-size: 16px; }
-    .modal-btns { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; }
+    .modal-btns { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+    .modal-btns-left { display: flex; gap: 6px; }
     .modal-btns-right { display: flex; gap: 8px; margin-left: auto; }
     .btn-cancel { background: #475569; color: white; border: none; padding: 10px 14px; border-radius: 6px; font-size: 14px; cursor: pointer; }
     .btn-save { background: #0284c7; color: white; border: none; padding: 10px 14px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
-    .btn-delete { background: #dc2626; color: white; border: none; padding: 10px 14px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; display: none; }
+    .btn-delete { background: #dc2626; color: white; border: none; padding: 10px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; display: none; }
+    .btn-hs-toggle { background: #d97706; color: white; border: none; padding: 10px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; display: none; }
     #toast {
       visibility: hidden; position: fixed; bottom: 25px; left: 50%; transform: translateX(-50%);
       background-color: #10b981; color: white; padding: 12px 20px; border-radius: 8px;
@@ -85,6 +94,9 @@
 <body>
 
 <header>
+  <div class="brand-header">
+    <img src="/logo.png" alt="Challivretou">
+  </div>
   <div class="search-box">
     <input type="search" id="searchInput" placeholder="Rechercher rue, numéro..." autofocus>
     <button class="clear-btn" id="clearBtn">×</button>
@@ -107,7 +119,7 @@
     <div style="font-size: 40px; margin-bottom: 10px;">📲</div>
     <h3 style="font-size: 18px; margin-bottom: 8px;">Installer l'application ?</h3>
     <p style="font-size: 14px; color: #94a3b8; margin-bottom: 20px; line-height: 1.4;">
-      Ajoutez <strong>Codes Portails</strong> sur votre écran d'accueil pour y accéder en 1 clic.
+      Ajoutez <strong>Challivretou</strong> sur votre écran d'accueil pour y accéder en 1 clic en tournée.
     </p>
     <div style="display:flex; justify-content:center; gap:12px;">
       <button class="btn-cancel" id="dismissInstallPopup">Plus tard</button>
@@ -124,7 +136,10 @@
     <label style="font-size: 13px; color: #94a3b8;">Code</label>
     <input type="text" id="modalCode">
     <div class="modal-btns">
-      <button class="btn-delete" id="deleteBtn">🗑️ Supprimer</button>
+      <div class="modal-btns-left">
+        <button class="btn-delete" id="deleteBtn" title="Supprimer votre ajout">🗑️ Suppr.</button>
+        <button class="btn-hs-toggle" id="hsToggleBtn">⚠️ Signaler HS</button>
+      </div>
       <div class="modal-btns-right">
         <button class="btn-cancel" id="cancelModal">Annuler</button>
         <button class="btn-save" id="saveModal">Sauvegarder</button>
@@ -157,6 +172,7 @@ const modalAddress = document.getElementById('modalAddress');
 const modalCode = document.getElementById('modalCode');
 const modalTitle = document.getElementById('modalTitle');
 const deleteBtn = document.getElementById('deleteBtn');
+const hsToggleBtn = document.getElementById('hsToggleBtn');
 const saveBtn = document.getElementById('saveModal');
 const toast = document.getElementById('toast');
 const installBtn = document.getElementById('installBtn');
@@ -164,6 +180,20 @@ const installPopupModal = document.getElementById('installPopupModal');
 const confirmInstallPopup = document.getElementById('confirmInstallPopup');
 const dismissInstallPopup = document.getElementById('dismissInstallPopup');
 const filterRecentBtn = document.getElementById('filterRecentBtn');
+
+// Gestion des créations propres à ce téléphone (Option 2)
+function getMyCreatedIds() {
+  try {
+    return JSON.parse(localStorage.getItem('chall_my_creations') || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+function recordMyCreation(id) {
+  const ids = getMyCreatedIds();
+  ids.push(id);
+  localStorage.setItem('chall_my_creations', JSON.stringify(ids));
+}
 
 function clean(str) {
   return (str || '').trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -220,18 +250,7 @@ async function loadData() {
     const res = await fetch('/api/codes');
     records = await res.json();
     if (!Array.isArray(records)) records = [];
-
-    // Nettoyage automatique silencieux de l'adresse test WC
-    let changed = false;
-    records.forEach(item => {
-      if (clean(item.a) === "wc" && clean(item.c) === "4950f" && item.u) {
-        delete item.u;
-        delete item.old_c;
-        changed = true;
-      }
-    });
-    if (changed) syncToServer();
-    else syncStatus.textContent = "🟢 À jour";
+    syncStatus.textContent = "🟢 À jour";
   } catch (e) {
     syncStatus.textContent = "🔴 Hors ligne";
   }
@@ -275,15 +294,17 @@ function renderList() {
     const originalIdx = records.indexOf(item);
     const dateLabel = formatUpdateDate(item.u);
     const isRecent = item.u && (Date.now() - item.u < 7 * 24 * 60 * 60 * 1000);
+    const isHS = Boolean(item.hs);
 
     const card = document.createElement('div');
-    card.className = 'card';
+    card.className = 'card' + (isHS ? ' is-hs' : '');
     card.innerHTML = `
       <div class="card-info">
         <div class="address">${item.a}</div>
         <div class="code-row">
-          <div class="code-badge">${item.c}</div>
-          ${isRecent ? '<span class="badge-recent">MAJ</span>' : ''}
+          <div class="code-badge ${isHS ? 'hs' : ''}">${isHS ? '⚠️ ' + item.c : item.c}</div>
+          ${isHS ? '<span class="badge-tag badge-hs-alert">Code HS</span>' : ''}
+          ${isRecent ? '<span class="badge-tag badge-recent">MAJ</span>' : ''}
         </div>
         ${dateLabel ? `<div class="updated-date">🕒 Modifié : ${dateLabel}</div>` : ''}
       </div>
@@ -311,9 +332,22 @@ window.openEdit = function(idx) {
   modalAddress.value = item.a;
   modalCode.value = item.c;
 
-  // Supprimable uniquement si créée il y a moins de 24h
-  const isDeletable = Boolean(item.created && (Date.now() - item.created < 24 * 60 * 60 * 1000));
-  deleteBtn.style.display = isDeletable ? 'block' : 'none';
+  // Option 2 : Supprimable UNIQUEMENT par le créateur sur ce téléphone et sous 24h
+  const myCreations = getMyCreatedIds();
+  const isMine = item.id && myCreations.includes(item.id);
+  const isUnder24h = item.created && (Date.now() - item.created < 24 * 60 * 60 * 1000);
+  deleteBtn.style.display = (isMine && isUnder24h) ? 'block' : 'none';
+
+  // Option 3 : Bouton de bascule Code HS
+  hsToggleBtn.style.display = 'block';
+  if (item.hs) {
+    hsToggleBtn.textContent = '✅ Code valide';
+    hsToggleBtn.style.background = '#059669';
+  } else {
+    hsToggleBtn.textContent = '⚠️ Signaler HS';
+    hsToggleBtn.style.background = '#d97706';
+  }
+
   editModal.style.display = 'flex';
 };
 
@@ -323,6 +357,7 @@ document.getElementById('openAddModal').addEventListener('click', () => {
   modalAddress.value = '';
   modalCode.value = '';
   deleteBtn.style.display = 'none';
+  hsToggleBtn.style.display = 'none';
   editModal.style.display = 'flex';
 });
 
@@ -330,10 +365,25 @@ document.getElementById('cancelModal').addEventListener('click', () => {
   editModal.style.display = 'none';
 });
 
+// Option 3 : Bascule de l'état HS
+hsToggleBtn.addEventListener('click', async () => {
+  if (editingIndex === null || isSaving) return;
+  isSaving = true;
+  const item = records[editingIndex];
+  item.hs = !item.hs;
+  editModal.style.display = 'none';
+  await syncToServer();
+  toast.textContent = item.hs ? 'Portail signalé HS' : 'Portail rétabli';
+  toast.className = 'show';
+  setTimeout(() => { toast.className = ''; }, 1500);
+  isSaving = false;
+});
+
+// Option 2 : Suppression restreinte au créateur
 deleteBtn.addEventListener('click', async () => {
   if (editingIndex === null || isSaving) return;
   const item = records[editingIndex];
-  if (confirm(`Supprimer "${item.a}" ?`)) {
+  if (confirm(`Supprimer définitivement "${item.a}" ?`)) {
     isSaving = true;
     records.splice(editingIndex, 1);
     editModal.style.display = 'none';
@@ -357,22 +407,28 @@ saveBtn.addEventListener('click', async () => {
 
   if (editingIndex !== null) {
     const prev = records[editingIndex];
-    // Détection automatique : si on remet l'ancien code d'origine
-    if (prev.old_c && clean(c) === clean(prev.old_c)) {
-      records[editingIndex] = { ...prev, a, c };
-      delete records[editingIndex].u;
-      delete records[editingIndex].old_c;
-    } else if (prev.a !== a || prev.c !== c) {
-      records[editingIndex] = {
-        ...prev,
-        a,
-        c,
-        old_c: prev.old_c || prev.c, // mémorise la version précédente
-        u: now
-      };
-    }
+    const hasCodeChanged = (clean(prev.c) !== clean(c));
+    
+    records[editingIndex] = {
+      ...prev,
+      a,
+      c,
+      // Si on modifie le code, on retire automatiquement le statut HS
+      hs: hasCodeChanged ? false : Boolean(prev.hs),
+      u: (prev.a !== a || hasCodeChanged) ? now : prev.u
+    };
   } else {
-    records.unshift({ a, c, u: now, created: now });
+    // Création d'une nouvelle adresse avec identifiant unique
+    const newId = 'id_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+    recordMyCreation(newId);
+    records.unshift({ 
+      id: newId,
+      a, 
+      c, 
+      u: now, 
+      created: now,
+      hs: false 
+    });
   }
 
   editModal.style.display = 'none';
