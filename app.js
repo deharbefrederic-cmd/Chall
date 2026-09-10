@@ -28,13 +28,43 @@ const confirmInstallPopup = document.getElementById('confirmInstallPopup');
 const dismissInstallPopup = document.getElementById('dismissInstallPopup');
 const filterRecentBtn = document.getElementById('filterRecentBtn');
 
-// --- Suivi des installations et des utilisateurs Web (URL) ---
+// --- Système de dialogue intégré SANS mention d'URL ---
+function showCustomDialog({ title, message, showCancel = true, okText = "OK", cancelText = "Annuler" }) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('dialogModal');
+    const titleEl = document.getElementById('dialogTitle');
+    const msgEl = document.getElementById('dialogMessage');
+    const cancelBtn = document.getElementById('dialogCancelBtn');
+    const okBtn = document.getElementById('dialogOkBtn');
+
+    titleEl.textContent = title || '';
+    msgEl.textContent = message || '';
+    okBtn.textContent = okText;
+    cancelBtn.textContent = cancelText;
+    cancelBtn.style.display = showCancel ? 'block' : 'none';
+
+    modal.style.display = 'flex';
+
+    const cleanup = () => {
+      modal.style.display = 'none';
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+    };
+
+    const onOk = () => { cleanup(); resolve(true); };
+    const onCancel = () => { cleanup(); resolve(false); };
+
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+  });
+}
+
+// --- Suivi des installations et utilisateurs Web ---
 async function trackDeviceInstallation() {
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   const ua = navigator.userAgent || '';
 
   if (isStandalone) {
-    // Cas 1 : Utilisateur ouvrant l'application installée
     if (!localStorage.getItem('chall_installed_reported')) {
       const platform = /android/i.test(ua) ? 'android' : (/iphone|ipad|ipod/i.test(ua) ? 'ios' : null);
       if (platform) {
@@ -49,7 +79,6 @@ async function trackDeviceInstallation() {
       }
     }
   } else {
-    // Cas 2 : Utilisateur naviguant directement via l'URL (sans avoir installé)
     if (!localStorage.getItem('chall_web_reported') && !localStorage.getItem('chall_installed_reported')) {
       try {
         await fetch('/api/stats', {
@@ -65,7 +94,6 @@ async function trackDeviceInstallation() {
 
 trackDeviceInstallation();
 
-// Confirmation directe Android au moment du clic sur "Installer"
 window.addEventListener('appinstalled', async () => {
   installBtn.style.display = 'none';
   installPopupModal.style.display = 'none';
@@ -83,28 +111,7 @@ window.addEventListener('appinstalled', async () => {
   }
 });
 
-// Vérification au lancement (fonctionne pour Apple et Android ouverts depuis l'icône)
-trackDeviceInstallation();
-
-// Confirmation directe Android
-window.addEventListener('appinstalled', async () => {
-  installBtn.style.display = 'none';
-  installPopupModal.style.display = 'none';
-  deferredPrompt = null;
-
-  if (!localStorage.getItem('chall_installed_reported')) {
-    try {
-      await fetch('/api/stats', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform: 'android' })
-      });
-      localStorage.setItem('chall_installed_reported', 'true');
-    } catch (e) {}
-  }
-});
-
-// --- Menu secret Admin (#stats) ---
+// Commande admin #stats sans URL
 async function checkAdminStatsCommand(val) {
   if (val.trim().toLowerCase() === '#stats') {
     searchInput.value = '';
@@ -118,20 +125,21 @@ async function checkAdminStatsCommand(val) {
       const totalInstalls = android + ios;
       const totalGlobal = totalInstalls + web;
 
-      alert(
-        `📊 Statistiques Challivretou :\n\n` +
-        `🤖 Appli Android : ${android}\n` +
-        `🍏 Appli Apple : ${ios}\n` +
-        `📱 Sous-total installés : ${totalInstalls}\n\n` +
-        `🌐 Via URL (sans installation) : ${web}\n\n` +
-        `👥 Total utilisateurs uniques : ${totalGlobal}`
-      );
+      await showCustomDialog({
+        title: "📊 Statistiques Challivretou",
+        message: `🤖 Appli Android : ${android}\n🍏 Appli Apple : ${ios}\n📱 Sous-total installés : ${totalInstalls}\n\n🌐 Navigateur URL : ${web}\n\n👥 Total utilisateurs uniques : ${totalGlobal}`,
+        showCancel: false,
+        okText: "Fermer"
+      });
     } catch (e) {
-      alert("Impossible de charger les statistiques.");
+      await showCustomDialog({
+        title: "Erreur",
+        message: "Impossible de charger les statistiques.",
+        showCancel: false
+      });
     }
   }
 }
-
 
 function getMyCreatedIds() {
   try {
@@ -364,10 +372,19 @@ hsToggleBtn.addEventListener('click', async () => {
   isSaving = false;
 });
 
+// Suppression avec dialogue propre
 deleteBtn.addEventListener('click', async () => {
   if (editingIndex === null || isSaving) return;
   const item = records[editingIndex];
-  if (confirm(`Supprimer définitivement "${item.a}" ?`)) {
+
+  const confirmed = await showCustomDialog({
+    title: "Confirmer la suppression",
+    message: `Voulez-vous vraiment supprimer définitivement "${item.a}" ?`,
+    okText: "Supprimer",
+    cancelText: "Annuler"
+  });
+
+  if (confirmed) {
     isSaving = true;
     records.splice(editingIndex, 1);
     editModal.style.display = 'none';
@@ -379,11 +396,21 @@ deleteBtn.addEventListener('click', async () => {
   }
 });
 
+// Sauvegarde avec fusion et dialogue propre SANS URL
 saveBtn.addEventListener('click', async () => {
   if (isSaving) return;
   const a = modalAddress.value.trim();
   const c = modalCode.value.trim();
-  if (!a || !c) return alert("Remplissez l'adresse et le code.");
+
+  if (!a || !c) {
+    await showCustomDialog({
+      title: "Champs incomplets",
+      message: "Veuillez renseigner à la fois l'adresse et le code.",
+      showCancel: false,
+      okText: "Compris"
+    });
+    return;
+  }
 
   const now = Date.now();
 
@@ -391,15 +418,14 @@ saveBtn.addEventListener('click', async () => {
     const match = findSimilarAddress(a);
     if (match) {
       const existing = match.item;
-      const updateExisting = confirm(
-        `⚠️ Adresse similaire trouvée !\n\n` +
-        `"${existing.a}" existe déjà avec le code : ${existing.c}\n\n` +
-        `Voulez-vous METTRE À JOUR son code avec "${c}" plutôt que de créer un doublon ?\n\n` +
-        `• Cliquez sur OK pour mettre à jour la fiche existante.\n` +
-        `• Cliquez sur Annuler pour créer une fiche séparée.`
-      );
+      const shouldUpdate = await showCustomDialog({
+        title: "⚠️ Adresse similaire trouvée",
+        message: `"${existing.a}" existe déjà avec le code : ${existing.c}\n\nSouhaitez-vous METTRE À JOUR son code avec "${c}" plutôt que de créer un doublon ?`,
+        okText: "Mettre à jour",
+        cancelText: "Créer à part"
+      });
 
-      if (updateExisting) {
+      if (shouldUpdate) {
         isSaving = true;
         saveBtn.disabled = true;
         existing.c = c;
