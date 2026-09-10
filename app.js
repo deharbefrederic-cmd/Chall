@@ -28,34 +28,60 @@ const confirmInstallPopup = document.getElementById('confirmInstallPopup');
 const dismissInstallPopup = document.getElementById('dismissInstallPopup');
 const filterRecentBtn = document.getElementById('filterRecentBtn');
 
-// --- Suivi des installations Android / Apple ---
+// --- Suivi des installations et des utilisateurs Web (URL) ---
 async function trackDeviceInstallation() {
-  // Ne reporte qu'une seule fois par appareil
-  if (localStorage.getItem('chall_installed_reported')) return;
-
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-  if (!isStandalone) return;
-
   const ua = navigator.userAgent || '';
-  let platform = null;
 
-  if (/android/i.test(ua)) {
-    platform = 'android';
-  } else if (/iphone|ipad|ipod/i.test(ua)) {
-    platform = 'ios';
+  if (isStandalone) {
+    // Cas 1 : Utilisateur ouvrant l'application installée
+    if (!localStorage.getItem('chall_installed_reported')) {
+      const platform = /android/i.test(ua) ? 'android' : (/iphone|ipad|ipod/i.test(ua) ? 'ios' : null);
+      if (platform) {
+        try {
+          await fetch('/api/stats', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'install', platform })
+          });
+          localStorage.setItem('chall_installed_reported', 'true');
+        } catch (e) {}
+      }
+    }
+  } else {
+    // Cas 2 : Utilisateur naviguant directement via l'URL (sans avoir installé)
+    if (!localStorage.getItem('chall_web_reported') && !localStorage.getItem('chall_installed_reported')) {
+      try {
+        await fetch('/api/stats', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'web' })
+        });
+        localStorage.setItem('chall_web_reported', 'true');
+      } catch (e) {}
+    }
   }
+}
 
-  if (platform) {
+trackDeviceInstallation();
+
+// Confirmation directe Android au moment du clic sur "Installer"
+window.addEventListener('appinstalled', async () => {
+  installBtn.style.display = 'none';
+  installPopupModal.style.display = 'none';
+  deferredPrompt = null;
+
+  if (!localStorage.getItem('chall_installed_reported')) {
     try {
       await fetch('/api/stats', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform })
+        body: JSON.stringify({ type: 'install', platform: 'android' })
       });
       localStorage.setItem('chall_installed_reported', 'true');
     } catch (e) {}
   }
-}
+});
 
 // Vérification au lancement (fonctionne pour Apple et Android ouverts depuis l'icône)
 trackDeviceInstallation();
