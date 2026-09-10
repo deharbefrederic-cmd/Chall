@@ -42,6 +42,21 @@
       color: #94a3b8; 
     }
     .status-right { display: flex; align-items: center; gap: 8px; }
+    .btn-toggle-recent {
+      background: #334155;
+      color: #cbd5e1;
+      border: 1px solid #475569;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .btn-toggle-recent.active {
+      background: #0369a1;
+      color: white;
+      border-color: #38bdf8;
+    }
     .btn-install {
       display: none;
       background: #0284c7;
@@ -61,9 +76,25 @@
     }
     .card-info { flex: 1; padding-right: 10px; }
     .address { font-size: 16px; font-weight: 600; color: #f1f5f9; }
+    .code-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
     .code-badge {
-      display: inline-block; margin-top: 4px; background: #0284c7; color: white;
+      display: inline-block; background: #0284c7; color: white;
       font-size: 17px; font-weight: 700; padding: 4px 10px; border-radius: 6px; letter-spacing: 0.5px;
+    }
+    .badge-recent {
+      background: #065f46;
+      color: #34d399;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .updated-date {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 4px;
     }
     .actions { display: flex; gap: 8px; }
     .btn-action {
@@ -119,6 +150,7 @@
   <div class="status-bar">
     <span id="itemCount">Synchronisation...</span>
     <div class="status-right">
+      <button id="filterRecentBtn" class="btn-toggle-recent">🕒 Récents</button>
       <button id="installBtn" class="btn-install">📲 Installer</button>
       <span id="syncStatus">🔄 Connecté</span>
     </div>
@@ -163,6 +195,7 @@ let records = [];
 let editingIndex = null;
 let toastTimeout;
 let deferredPrompt = null;
+let filterRecentOnly = false;
 
 const searchInput = document.getElementById('searchInput');
 const clearBtn = document.getElementById('clearBtn');
@@ -178,14 +211,41 @@ const installBtn = document.getElementById('installBtn');
 const installPopupModal = document.getElementById('installPopupModal');
 const confirmInstallPopup = document.getElementById('confirmInstallPopup');
 const dismissInstallPopup = document.getElementById('dismissInstallPopup');
+const filterRecentBtn = document.getElementById('filterRecentBtn');
 
-// Détection de la compatibilité d'installation
+// Gestion du format d'affichage de la date
+function formatUpdateDate(ts) {
+  if (!ts) return null;
+  const now = Date.now();
+  const diffHours = (now - ts) / (1000 * 60 * 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffHours < 24) return "Aujourd'hui";
+  if (diffDays === 1) return "Hier";
+  if (diffDays < 7) return `Il y a ${diffDays} j`;
+
+  const d = new Date(ts);
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+}
+
+function isUpdatedRecently(ts) {
+  if (!ts) return false;
+  return (Date.now() - ts) < (7 * 24 * 60 * 60 * 1000); // 7 jours
+}
+
+// Toggle filtre récents
+filterRecentBtn.addEventListener('click', () => {
+  filterRecentOnly = !filterRecentOnly;
+  filterRecentBtn.classList.toggle('active', filterRecentOnly);
+  renderList();
+});
+
+// Installation PWA
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
   installBtn.style.display = 'inline-block';
 
-  // Affichage automatique de la popup si elle n'a pas été fermée durant la session
   if (!sessionStorage.getItem('install_popup_dismissed')) {
     installPopupModal.style.display = 'flex';
   }
@@ -239,4 +299,116 @@ async function syncToServer() {
   syncStatus.textContent = "⏳ Envoi...";
   try {
     await fetch('/api/codes', {
-      method:
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(records)
+    });
+    syncStatus.textContent = "🟢 À jour";
+  } catch (e) {
+    alert("Erreur de synchronisation réseau.");
+    syncStatus.textContent = "⚠️ Échec sync";
+  }
+  renderList();
+}
+
+function renderList() {
+  const query = normalize(searchInput.value.trim());
+  const terms = query.split(/\s+/).filter(Boolean);
+
+  let filtered = records.filter(item => {
+    if (filterRecentOnly && !item.u) return false;
+    if (!terms.length) return true;
+    const target = normalize(item.a || '');
+    return terms.every(term => target.includes(term));
+  });
+
+  if (filterRecentOnly) {
+    filtered.sort((x, y) => (y.u || 0) - (x.u || 0));
+  }
+
+  itemCount.textContent = `${filtered.length} résultat(s)`;
+  codeList.innerHTML = '';
+
+  filtered.forEach((item) => {
+    const originalIdx = records.indexOf(item);
+    const dateLabel = formatUpdateDate(item.u);
+    const recent = isUpdatedRecently(item.u);
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="card-info">
+        <div class="address">${item.a}</div>
+        <div class="code-row">
+          <div class="code-badge">${item.c}</div>
+          ${recent ? '<span class="badge-recent">MAJ</span>' : ''}
+        </div>
+        ${dateLabel ? `<div class="updated-date">🕒 Modifié : ${dateLabel}</div>` : ''}
+      </div>
+      <div class="actions">
+        <button class="btn-action" onclick="copyCode('${(item.c || '').replace(/'/g, "\\'")}')">📋</button>
+        <button class="btn-action" onclick="openEdit(${originalIdx})">✏️</button>
+      </div>
+    `;
+    codeList.appendChild(card);
+  });
+}
+
+window.copyCode = function(val) {
+  navigator.clipboard.writeText(val);
+  toast.textContent = 'Code copié : ' + val;
+  toast.className = 'show';
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => {
+    toast.className = '';
+  }, 1500);
+};
+
+window.openEdit = function(idx) {
+  editingIndex = idx;
+  modalTitle.textContent = "Modifier l'adresse";
+  modalAddress.value = records[idx].a;
+  modalCode.value = records[idx].c;
+  editModal.style.display = 'flex';
+};
+
+document.getElementById('openAddModal').addEventListener('click', () => {
+  editingIndex = null;
+  modalTitle.textContent = "Ajouter un code";
+  modalAddress.value = '';
+  modalCode.value = '';
+  editModal.style.display = 'flex';
+});
+
+document.getElementById('cancelModal').addEventListener('click', () => {
+  editModal.style.display = 'none';
+});
+
+document.getElementById('saveModal').addEventListener('click', async () => {
+  const a = modalAddress.value.trim();
+  const c = modalCode.value.trim();
+  if (!a || !c) return alert("Remplissez l'adresse et le code.");
+
+  const now = Date.now();
+
+  if (editingIndex !== null) {
+    records[editingIndex] = { a, c, u: now };
+  } else {
+    records.unshift({ a, c, u: now });
+  }
+
+  editModal.style.display = 'none';
+  await syncToServer();
+});
+
+searchInput.addEventListener('input', renderList);
+clearBtn.addEventListener('click', () => {
+  searchInput.value = '';
+  searchInput.focus();
+  renderList();
+});
+
+loadData();
+</script>
+</body>
+</html>
