@@ -8,19 +8,12 @@
   <meta name="theme-color" content="#1e293b">
   <style>
     * { 
-      box-sizing: border-box; 
-      margin: 0; 
-      padding: 0; 
+      box-sizing: border-box; margin: 0; padding: 0; 
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      -webkit-user-select: none;
-      user-select: none;
-      -webkit-touch-callout: none;
-      -webkit-tap-highlight-color: transparent;
+      -webkit-user-select: none; user-select: none;
+      -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
     }
-    input {
-      -webkit-user-select: text;
-      user-select: text;
-    }
+    input { -webkit-user-select: text; user-select: text; }
     body { background: #0f172a; color: #f8fafc; padding: 12px; padding-bottom: 80px; }
     header { position: sticky; top: 0; background: #0f172a; padding: 8px 0; z-index: 10; }
     .search-box { position: relative; width: 100%; }
@@ -33,42 +26,17 @@
       position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
       background: #475569; border: none; color: white; border-radius: 50%; width: 26px; height: 26px; cursor: pointer;
     }
-    .status-bar { 
-      display: flex; 
-      justify-content: space-between; 
-      align-items: center; 
-      margin: 8px 4px; 
-      font-size: 13px; 
-      color: #94a3b8; 
-    }
+    .status-bar { display: flex; justify-content: space-between; align-items: center; margin: 8px 4px; font-size: 13px; color: #94a3b8; }
     .status-right { display: flex; align-items: center; gap: 8px; }
     .btn-toggle-recent {
-      background: #334155;
-      color: #cbd5e1;
-      border: 1px solid #475569;
-      padding: 4px 8px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
+      background: #334155; color: #cbd5e1; border: 1px solid #475569; padding: 4px 8px;
+      border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer;
     }
-    .btn-toggle-recent.active {
-      background: #0369a1;
-      color: white;
-      border-color: #38bdf8;
-    }
+    .btn-toggle-recent.active { background: #0369a1; color: white; border-color: #38bdf8; }
     .btn-install {
-      display: none;
-      background: #0284c7;
-      color: white;
-      border: none;
-      padding: 4px 10px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
+      display: none; background: #0284c7; color: white; border: none; padding: 4px 10px;
+      border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;
     }
-    .btn-install:active { background: #0369a1; }
     .list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
     .card {
       background: #1e293b; border-radius: 10px; padding: 12px 14px; display: flex;
@@ -82,26 +50,15 @@
       font-size: 17px; font-weight: 700; padding: 4px 10px; border-radius: 6px; letter-spacing: 0.5px;
     }
     .badge-recent {
-      background: #065f46;
-      color: #34d399;
-      font-size: 10px;
-      font-weight: 700;
-      padding: 2px 6px;
-      border-radius: 4px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+      background: #065f46; color: #34d399; font-size: 10px; font-weight: 700;
+      padding: 2px 6px; border-radius: 4px; text-transform: uppercase;
     }
-    .updated-date {
-      font-size: 11px;
-      color: #64748b;
-      margin-top: 4px;
-    }
+    .updated-date { font-size: 11px; color: #64748b; margin-top: 4px; }
     .actions { display: flex; gap: 8px; }
     .btn-action {
       background: #334155; border: none; color: #cbd5e1; border-radius: 8px;
       padding: 10px; font-size: 14px; cursor: pointer;
     }
-    .btn-action:active { background: #475569; }
     .btn-add {
       position: fixed; bottom: 16px; right: 16px; background: #0284c7; color: white;
       border: none; width: 56px; height: 56px; border-radius: 28px; font-size: 28px;
@@ -110,38 +67,18 @@
     .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); align-items: center; justify-content: center; padding: 20px; z-index: 30; }
     .modal-content { background: #1e293b; padding: 20px; border-radius: 12px; width: 100%; max-width: 400px; }
     .modal-content input { width: 100%; padding: 12px; margin: 8px 0 16px; background: #0f172a; border: 1px solid #334155; color: white; border-radius: 8px; font-size: 16px; }
-    
     .modal-btns { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; }
     .modal-btns-right { display: flex; gap: 8px; margin-left: auto; }
     .btn-cancel { background: #475569; color: white; border: none; padding: 10px 14px; border-radius: 6px; font-size: 14px; cursor: pointer; }
     .btn-save { background: #0284c7; color: white; border: none; padding: 10px 14px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
-    .btn-save:disabled { opacity: 0.6; cursor: not-allowed; }
     .btn-delete { background: #dc2626; color: white; border: none; padding: 10px 14px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; display: none; }
-
     #toast {
-      visibility: hidden;
-      position: fixed;
-      bottom: 25px;
-      left: 50%;
-      transform: translateX(-50%);
-      background-color: #10b981;
-      color: white;
-      padding: 12px 20px;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 15px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-      z-index: 100;
-      opacity: 0;
-      transition: opacity 0.2s, bottom 0.2s;
-      pointer-events: none;
-      white-space: nowrap;
+      visibility: hidden; position: fixed; bottom: 25px; left: 50%; transform: translateX(-50%);
+      background-color: #10b981; color: white; padding: 12px 20px; border-radius: 8px;
+      font-weight: 600; font-size: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); z-index: 100;
+      opacity: 0; transition: opacity 0.2s, bottom 0.2s; pointer-events: none; white-space: nowrap;
     }
-    #toast.show {
-      visibility: visible;
-      opacity: 1;
-      bottom: 35px;
-    }
+    #toast.show { visibility: visible; opacity: 1; bottom: 35px; }
   </style>
 </head>
 <body>
@@ -152,11 +89,11 @@
     <button class="clear-btn" id="clearBtn">×</button>
   </div>
   <div class="status-bar">
-    <span id="itemCount">Synchronisation...</span>
+    <span id="itemCount">Chargement...</span>
     <div class="status-right">
       <button id="filterRecentBtn" class="btn-toggle-recent">🕒 Récents</button>
       <button id="installBtn" class="btn-install">📲 Installer</button>
-      <span id="syncStatus">🔄 Connecté</span>
+      <span id="syncStatus">⏳ Connexion...</span>
     </div>
   </div>
 </header>
@@ -169,9 +106,9 @@
     <div style="font-size: 40px; margin-bottom: 10px;">📲</div>
     <h3 style="font-size: 18px; margin-bottom: 8px;">Installer l'application ?</h3>
     <p style="font-size: 14px; color: #94a3b8; margin-bottom: 20px; line-height: 1.4;">
-      Ajoutez <strong>Codes Portails</strong> sur votre écran d'accueil pour y accéder en 1 clic sans passer par le navigateur.
+      Ajoutez <strong>Codes Portails</strong> sur votre écran d'accueil pour y accéder en 1 clic.
     </p>
-    <div class="modal-btns" style="justify-content: center; gap: 12px;">
+    <div style="display:flex; justify-content:center; gap:12px;">
       <button class="btn-cancel" id="dismissInstallPopup">Plus tard</button>
       <button class="btn-save" id="confirmInstallPopup">Installer</button>
     </div>
@@ -185,7 +122,6 @@
     <input type="text" id="modalAddress">
     <label style="font-size: 13px; color: #94a3b8;">Code</label>
     <input type="text" id="modalCode">
-    
     <div class="modal-btns">
       <button class="btn-delete" id="deleteBtn">🗑️ Supprimer</button>
       <div class="modal-btns-right">
@@ -202,150 +138,6 @@
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
-
-// Répertoire de référence pour détecter automatiquement les retours aux codes d'origine
-const BASE_REGISTRY = {
-  "wc": "4950f",
-  "1215 num enzo": "1215",
-  "bureaux carrefour": "2305*",
-  "avenue amouroux / avenue miltat": "753a",
-  "parc st exupery": "2308b",
-  "1 avenue miltat": "259a",
-  "1 avenue gravier": "1901a",
-  "2 avenue fanny": "251b",
-  "2 chemin des jarres": "1984",
-  "2 rue prince maurice": "3625a",
-  "2 astrid briand": "8588a",
-  "3 chemin des jarres": "6532",
-  "3 avenue clement ader": "1106a",
-  "3 avenue des mousquetaires": "1966a",
-  "3 avenue du ray": "3852",
-  "3 avenue gravier": "9632a",
-  "3 rue blasco ibanez": "0354a",
-  "3 rue des roses": "4136b",
-  "4 avenue cyrnos": "2345 / 857a",
-  "4 avenue julien": "4528a",
-  "4 rue paul bounin": "1378",
-  "4 rue blasco ibanez": "1510",
-  "5 avenue clement ader": "2108a",
-  "5 rue general laperine bat. a": "8020",
-  "6 avenue lieutenant charpentier": "2496a",
-  "6 rue des chevaliers de malte": "1515#",
-  "6 rue veillon": "2112a",
-  "6/8 avenue mireille": "6183a",
-  "6bis fontaine du temple": "5720a",
-  "7 avenue gravier": "27413a",
-  "7 avenue jean de la fontaine": "1789e",
-  "8 avenue de valombrose": "3945a",
-  "8 avenue henri dunant": "5743a",
-  "8 boulevard henri sappia": "0369",
-  "9 charles baudelaire esc 2": "6404a",
-  "10 avenue de gairaut": "2206🔔",
-  "10b avenue de gairaut": "3413a",
-  "10 chemin abbaye saint pons": "6917",
-  "10 rue charles baudelaire": "2468a",
-  "11 avenue mireille": "3624a",
-  "11 avenue valentiny": "0209a",
-  "11 rue veillon": "1939a",
-  "12 avenue notre dame": "4812",
-  "12 avenue de gairaut": "2704a",
-  "12 rue des lilas": "1871a",
-  "12 rue puget": "4011a",
-  "12bis rue du grand pin": "7438a",
-  "13 avenue cyrnos": "101571a",
-  "13 avenue sainte colette": "36024a",
-  "13 avenue valentiny": "1740a",
-  "13 rue michel ange": "1957",
-  "14 boulevard henri sappia": "1426a",
-  "14 rue puget": "198a",
-  "15 avenue alfred borriglione": "1603",
-  "16 rue charles de foucauld": "iris 1945 / tulipes 2231*",
-  "16 rue puget": "1606",
-  "16 rue charles baudelaire": "0716a",
-  "17 avenue de la marne": "1859",
-  "15-17 rue charles de foucauld": "2021",
-  "19 avenue de valombrose": "2846a",
-  "19 avenue st-sylvestre": "2684a",
-  "19 boulevard gorbella": "1951*",
-  "20 rue charles baudelaire": "3026a",
-  "21 avenue caravadossi": "1708a",
-  "21 avenue scuderi": "1410a",
-  "22b avenue gravier": "4810",
-  "22b edmond rostand": "1622a",
-  "23 avenue gallin": "2408a",
-  "23 avenue scuderi": "2346",
-  "23 rue georges doublet": "1789",
-  "24 avenue henry musso": "1956e / 1976",
-  "25 avenue de gairaut": "4203a",
-  "25 rue puget": "1927a",
-  "25 rue georges doublet": "1808a",
-  "27 avenue alfred de vigny": "1963a",
-  "27 avenue scuderi (bat c&d)": "402719a",
-  "28 avenue alfred borriglione": "1625a",
-  "28 rue edouard dalmas": "6453a",
-  "28 vieux chemin de gairaut": "31050",
-  "29 parc maria": "88a",
-  "30 vieux chemin de gairaut": "2374",
-  "30bis vieux chemin de gairaut": "2407a",
-  "31 avenue cap de croix": "1410a",
-  "31 boulevard gorbella": "4915a",
-  "32/34 vieux chemin de gairaut": "4269a",
-  "34 avenue de flirey": "0201a",
-  "33 avenue georges v": "1832#",
-  "37 boulevard de cessole": "1120",
-  "37 theodore de banville": "1608a",
-  "39 boulevard gorbella": "6783a",
-  "41 boulevard gorbella": "6783a",
-  "42 avenue caravadossi": "1953a",
-  "42 boulevard gorbella": "2457",
-  "43 boulevard gorbella": "6783a",
-  "44 avenue de la marne": "1536a (bat e: 0307)",
-  "45 boulevard gorbella": "6783a",
-  "50 boulevard henri sappia": "4020a",
-  "53 avenue du ray": "8170a",
-  "54 avenue du ray": "2580",
-  "55 boulevard jean behra": "cle2707cle",
-  "57 avenue du ray": "8687*",
-  "63 boulevard henri sappia": "1289a",
-  "64 avenue cap de croix (portillon)": "2429a",
-  "66 avenue st-barthelemy": "2407",
-  "66 avenue cyrnos": "6164a",
-  "64/68 avenue cap de croix": "1208 / 1804a",
-  "68 avenue st-barthelemy": "1936a",
-  "69 boulevard gorbella": "2433a",
-  "71 cap de croix": "2020",
-  "75 boulevard jean behra": "1968a",
-  "79 boulevard henri sappia": "1931a",
-  "80 avenue brancolar": "6742",
-  "80 avenue cyrille besset": "02020",
-  "81/83 boulevard henri sappia": "4456a",
-  "83/89/93 avenue de rimiez": "27931",
-  "85 avenue valrose": "4807",
-  "95 boulevard de cessole": "4689a",
-  "103 avenue cyrille besset": "7265b",
-  "105 avenue cyrille besset": "2841a",
-  "107 avenue cyrille besset": "2050",
-  "107 avenue de gairaut": "6391a",
-  "107 avenue de rimiez": "1968a / 6819",
-  "109 avenue de gairaut": "1985",
-  "119 avenue de brancolar": "774a / 172a",
-  "134 avenue de rimiez": "1340 / 2354",
-  "152 boulevard cessole": "4769a",
-  "155/157 avenue cyrille besset": "7638",
-  "156 avenue de cessole": "0407a",
-  "164 boulevard de cessole": "1750",
-  "170 avenue de gairaut": "8532a",
-  "182 avenue de gairaut": "2408a",
-  "183 avenue de rimiez": "2405 / 5137a",
-  "184 avenue de gairaut": "0708",
-  "190 avenue de pessicart": "4565a",
-  "184/186 avenue de gairaut": "5869a",
-  "186bis avenue de pessicart": "1030a",
-  "197 avenue de gairaut": "2619a",
-  "242 avenue de gairaut": "3319a",
-  "270 avenue de pessicart": "2307",
-  "309 avenue jules romains": "3112a"
-};
 
 let records = [];
 let editingIndex = null;
@@ -372,31 +164,17 @@ const confirmInstallPopup = document.getElementById('confirmInstallPopup');
 const dismissInstallPopup = document.getElementById('dismissInstallPopup');
 const filterRecentBtn = document.getElementById('filterRecentBtn');
 
-function cleanStr(str) {
-  return (str || '').trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, ' ');
-}
-
-function normalize(str) {
-  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+function clean(str) {
+  return (str || '').trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
 function formatUpdateDate(ts) {
   if (!ts) return null;
-  const now = Date.now();
-  const diffHours = (now - ts) / (1000 * 60 * 60);
-  const diffDays = Math.floor(diffHours / 24);
-
-  if (diffHours < 24) return "Aujourd'hui";
+  const diffDays = Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return "Aujourd'hui";
   if (diffDays === 1) return "Hier";
   if (diffDays < 7) return `Il y a ${diffDays} j`;
-
-  const d = new Date(ts);
-  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
-}
-
-function isUpdatedRecently(ts) {
-  if (!ts) return false;
-  return (Date.now() - ts) < (7 * 24 * 60 * 60 * 1000);
+  return new Date(ts).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
 }
 
 filterRecentBtn.addEventListener('click', () => {
@@ -409,9 +187,8 @@ window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
   installBtn.style.display = 'inline-block';
-
-  if (!localStorage.getItem('pwa_popup_presented')) {
-    localStorage.setItem('pwa_popup_presented', 'true');
+  if (!localStorage.getItem('pwa_prompt_shown')) {
+    localStorage.setItem('pwa_prompt_shown', 'true');
     installPopupModal.style.display = 'flex';
   }
 });
@@ -421,9 +198,7 @@ confirmInstallPopup.addEventListener('click', async () => {
   if (!deferredPrompt) return;
   deferredPrompt.prompt();
   const { outcome } = await deferredPrompt.userChoice;
-  if (outcome === 'accepted') {
-    installBtn.style.display = 'none';
-  }
+  if (outcome === 'accepted') installBtn.style.display = 'none';
   deferredPrompt = null;
 });
 
@@ -435,41 +210,27 @@ installBtn.addEventListener('click', async () => {
   if (!deferredPrompt) return;
   deferredPrompt.prompt();
   const { outcome } = await deferredPrompt.userChoice;
-  if (outcome === 'accepted') {
-    installBtn.style.display = 'none';
-  }
-  deferredPrompt = null;
-});
-
-window.addEventListener('appinstalled', () => {
-  installBtn.style.display = 'none';
-  installPopupModal.style.display = 'none';
+  if (outcome === 'accepted') installBtn.style.display = 'none';
   deferredPrompt = null;
 });
 
 async function loadData() {
-  syncStatus.textContent = "⏳ Chargement...";
   try {
     const res = await fetch('/api/codes');
-    const data = await res.json();
-    records = Array.isArray(data) && data.length > 0 ? data : [];
-    
-    // Détection automatique : nettoie immédiatement toute adresse qui a son code d'origine (comme WC)
-    let autoCleaned = false;
+    records = await res.json();
+    if (!Array.isArray(records)) records = [];
+
+    // Nettoyage automatique silencieux de l'adresse test WC
+    let changed = false;
     records.forEach(item => {
-      const baseCode = BASE_REGISTRY[cleanStr(item.a)] || item.base_c;
-      if (baseCode && cleanStr(item.c) === cleanStr(baseCode) && item.u) {
+      if (clean(item.a) === "wc" && clean(item.c) === "4950f" && item.u) {
         delete item.u;
-        delete item.prev_c;
-        autoCleaned = true;
+        delete item.old_c;
+        changed = true;
       }
     });
-
-    if (autoCleaned) {
-      syncToServer();
-    } else {
-      syncStatus.textContent = "🟢 À jour";
-    }
+    if (changed) syncToServer();
+    else syncStatus.textContent = "🟢 À jour";
   } catch (e) {
     syncStatus.textContent = "🔴 Hors ligne";
   }
@@ -486,21 +247,20 @@ async function syncToServer() {
     });
     syncStatus.textContent = "🟢 À jour";
   } catch (e) {
-    alert("Erreur de synchronisation réseau.");
     syncStatus.textContent = "⚠️ Échec sync";
   }
   renderList();
 }
 
 function renderList() {
-  const query = normalize(searchInput.value.trim());
+  const query = clean(searchInput.value);
   const terms = query.split(/\s+/).filter(Boolean);
 
   let filtered = records.filter(item => {
     if (filterRecentOnly && !item.u) return false;
     if (!terms.length) return true;
-    const target = normalize(item.a || '');
-    return terms.every(term => target.includes(term));
+    const target = clean(item.a || '');
+    return terms.every(t => target.includes(t));
   });
 
   if (filterRecentOnly) {
@@ -510,10 +270,10 @@ function renderList() {
   itemCount.textContent = `${filtered.length} résultat(s)`;
   codeList.innerHTML = '';
 
-  filtered.forEach((item) => {
+  filtered.forEach(item => {
     const originalIdx = records.indexOf(item);
     const dateLabel = formatUpdateDate(item.u);
-    const recent = isUpdatedRecently(item.u);
+    const isRecent = item.u && (Date.now() - item.u < 7 * 24 * 60 * 60 * 1000);
 
     const card = document.createElement('div');
     card.className = 'card';
@@ -522,7 +282,7 @@ function renderList() {
         <div class="address">${item.a}</div>
         <div class="code-row">
           <div class="code-badge">${item.c}</div>
-          ${recent ? '<span class="badge-recent">MAJ</span>' : ''}
+          ${isRecent ? '<span class="badge-recent">MAJ</span>' : ''}
         </div>
         ${dateLabel ? `<div class="updated-date">🕒 Modifié : ${dateLabel}</div>` : ''}
       </div>
@@ -540,9 +300,7 @@ window.copyCode = function(val) {
   toast.textContent = 'Code copié : ' + val;
   toast.className = 'show';
   clearTimeout(toastTimeout);
-  toastTimeout = setTimeout(() => {
-    toast.className = '';
-  }, 1500);
+  toastTimeout = setTimeout(() => { toast.className = ''; }, 1500);
 };
 
 window.openEdit = function(idx) {
@@ -552,11 +310,9 @@ window.openEdit = function(idx) {
   modalAddress.value = item.a;
   modalCode.value = item.c;
 
-  // Supprimable UNIQUEMENT si créée il y a moins de 24h
-  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-  const isDeletable = Boolean(item.created && (Date.now() - item.created < ONE_DAY_MS));
+  // Supprimable uniquement si créée il y a moins de 24h
+  const isDeletable = Boolean(item.created && (Date.now() - item.created < 24 * 60 * 60 * 1000));
   deleteBtn.style.display = isDeletable ? 'block' : 'none';
-
   editModal.style.display = 'flex';
 };
 
@@ -576,10 +332,62 @@ document.getElementById('cancelModal').addEventListener('click', () => {
 deleteBtn.addEventListener('click', async () => {
   if (editingIndex === null || isSaving) return;
   const item = records[editingIndex];
-  if (confirm(`Supprimer définitivement "${item.a}" ?`)) {
+  if (confirm(`Supprimer "${item.a}" ?`)) {
     isSaving = true;
     records.splice(editingIndex, 1);
     editModal.style.display = 'none';
     await syncToServer();
     toast.textContent = 'Adresse supprimée';
     toast.className = 'show';
+    setTimeout(() => { toast.className = ''; }, 1500);
+    isSaving = false;
+  }
+});
+
+saveBtn.addEventListener('click', async () => {
+  if (isSaving) return;
+  const a = modalAddress.value.trim();
+  const c = modalCode.value.trim();
+  if (!a || !c) return alert("Remplissez l'adresse et le code.");
+
+  isSaving = true;
+  saveBtn.disabled = true;
+  const now = Date.now();
+
+  if (editingIndex !== null) {
+    const prev = records[editingIndex];
+    // Détection automatique : si on remet l'ancien code d'origine
+    if (prev.old_c && clean(c) === clean(prev.old_c)) {
+      records[editingIndex] = { ...prev, a, c };
+      delete records[editingIndex].u;
+      delete records[editingIndex].old_c;
+    } else if (prev.a !== a || prev.c !== c) {
+      records[editingIndex] = {
+        ...prev,
+        a,
+        c,
+        old_c: prev.old_c || prev.c, // mémorise la version précédente
+        u: now
+      };
+    }
+  } else {
+    records.unshift({ a, c, u: now, created: now });
+  }
+
+  editModal.style.display = 'none';
+  await syncToServer();
+  saveBtn.disabled = false;
+  isSaving = false;
+});
+
+searchInput.addEventListener('input', renderList);
+clearBtn.addEventListener('click', () => {
+  searchInput.value = '';
+  searchInput.focus();
+  renderList();
+});
+
+loadData();
+</script>
+</body>
+</html>
