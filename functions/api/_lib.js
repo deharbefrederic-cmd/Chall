@@ -117,3 +117,25 @@ export async function archive(db, row, action, actor) {
     .bind(row.id, row.address, row.code, row.hs, action, actor, Date.now())
     .run();
 }
+
+/** Système + mode d'affichage, déduits des en-têtes. */
+export function devicePlatform(request) {
+  const ua = request.headers.get('User-Agent') || '';
+  const mode = request.headers.get('X-Chall-Mode') === 'app' ? 'app' : 'web';
+  const os = /android/i.test(ua) ? 'android' : /iphone|ipad|ipod/i.test(ua) ? 'ios' : 'autre';
+  return os + '-' + mode;
+}
+
+/** Marque l'appareil comme vu. Une ligne par appareil, jamais de doublon. */
+export async function touchDevice(db, id, platform) {
+  if (!id) return;
+  const now = Date.now();
+  await db
+    .prepare(
+      `INSERT INTO devices (client_id, platform, first_seen, last_seen)
+       VALUES (?1, ?2, ?3, ?3)
+       ON CONFLICT(client_id) DO UPDATE SET last_seen = ?3, platform = ?2`
+    )
+    .bind(id, platform, now)
+    .run();
+}

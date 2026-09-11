@@ -1,6 +1,6 @@
 import {
   json, sanitizeText, normAddress, isValidId, clientId, toRecord, readJson,
-  rateLimit, ipBucket, MAX_ADDRESS, MAX_CODE
+  rateLimit, ipBucket, devicePlatform, touchDevice, MAX_ADDRESS, MAX_CODE
 } from './_lib.js';
 
 export async function onRequestGet(context) {
@@ -14,6 +14,9 @@ export async function onRequestGet(context) {
        ORDER BY address COLLATE NOCASE`
     )
     .all();
+
+  // Présence de l'appareil : c'est ce qui permet de compter les utilisateurs actifs.
+  await touchDevice(db, me, devicePlatform(context.request));
 
   return json({ records: (results || []).map((row) => toRecord(row, me)) });
 }
