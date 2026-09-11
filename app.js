@@ -575,6 +575,17 @@ async function fetchSuggestions(query) {
     '&q=' +
     encodeURIComponent(query);
 
+  // Numéro de voie saisi, à réinjecter si la suggestion est une rue sans numéro.
+  // Le motif ne happe pas la première lettre du type de voie : dans « 12rue »,
+  // le « r » n'est pas suivi d'une fin de mot, il n'est donc pas pris pour un bis.
+  const saisi = query.match(/^\s*(\d+)(?:\s*(bis|ter)\b|([a-zA-Z])\b)?/i);
+  let numero = null;
+  if (saisi) {
+    numero = saisi[1];
+    if (saisi[2]) numero += saisi[2].toLowerCase();
+    else if (saisi[3]) numero += saisi[3].toUpperCase();
+  }
+
   try {
     // Requête vers un service tiers : aucun en-tête de l'application n'y est joint.
     const res = await fetch(url, { signal: suggestController.signal });
@@ -584,8 +595,11 @@ async function fetchSuggestions(query) {
     const labels = [];
     for (const feature of data.features || []) {
       const props = feature.properties || {};
-      const label = props.name || props.label;
-      if (label && !labels.includes(label)) labels.push(label);
+      let label = props.name || props.label;
+      if (!label) continue;
+      // La BAN renvoie la rue seule quand le numéro lui est inconnu.
+      if (numero && !props.housenumber && !/^\d/.test(label)) label = numero + ' ' + label;
+      if (!labels.includes(label)) labels.push(label);
     }
     showSuggestions(labels);
   } catch {
