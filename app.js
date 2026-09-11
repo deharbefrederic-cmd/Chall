@@ -524,7 +524,9 @@ const NICE_INSEE = '06088';
 const suggestBox = document.createElement('div');
 suggestBox.style.cssText =
   'display:none;margin:-6px 0 12px;border:1px solid #334155;border-radius:10px;' +
-  'background:#0f172a;max-height:190px;overflow-y:auto;';
+  'background:#0f172a;max-height:210px;overflow-y:auto;' +
+  // pan-y : le doigt peut faire défiler la liste verticalement.
+  'touch-action:pan-y;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;';
 modalAddress.insertAdjacentElement('afterend', suggestBox);
 
 let suggestTimer = null;
@@ -549,9 +551,9 @@ function showSuggestions(labels) {
     row.style.cssText =
       'display:block;width:100%;text-align:left;padding:11px 14px;background:transparent;' +
       'border:0;border-bottom:1px solid #1e293b;color:#e2e8f0;font-size:14px;';
-    // pointerdown plutôt que click : se déclenche avant que le champ perde le focus.
-    row.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
+    // click, et surtout pas preventDefault sur l'appui : cela bloquerait
+    // le geste de défilement de la liste.
+    row.addEventListener('click', () => {
       modalAddress.value = label;
       hideSuggestions();
       modalCode.focus();
@@ -601,7 +603,9 @@ modalAddress.addEventListener('input', () => {
   suggestTimer = setTimeout(() => fetchSuggestions(query), 250);
 });
 
-modalAddress.addEventListener('blur', () => setTimeout(hideSuggestions, 150));
+// La liste se ferme quand on passe au champ Code, pas sur la perte de focus :
+// un simple défilement faisait perdre le focus et fermait la liste.
+modalCode.addEventListener('focus', hideSuggestions);
 
 /* ------------------------------- actions -------------------------------- */
 
