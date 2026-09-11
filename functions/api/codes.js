@@ -1,6 +1,6 @@
 import {
   json, sanitizeText, normAddress, isValidId, clientId, toRecord, readJson,
-  rateLimit, ipBucket, devicePlatform, touchDevice, MAX_ADDRESS, MAX_CODE
+  rateLimit, ipBucket, devicePlatform, touchDevice, formatAddress, MAX_ADDRESS, MAX_CODE
 } from './_lib.js';
 
 export async function onRequestGet(context) {
@@ -37,7 +37,8 @@ export async function onRequestPost(context) {
   const body = await readJson(request);
   if (!body) return json({ error: 'bad_request', message: 'Corps de requête illisible.' }, 400);
 
-  const address = sanitizeText(body.address, MAX_ADDRESS);
+  const brut = sanitizeText(body.address, MAX_ADDRESS);
+  const address = brut ? formatAddress(brut) : null;
   const code = sanitizeText(body.code, MAX_CODE);
 
   if (!address || address.length < 3) {
