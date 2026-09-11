@@ -319,8 +319,10 @@ function renderList() {
   let filtered = records.filter((item) => {
     if (filterRecentOnly && !item.updatedAt) return false;
     if (!terms.length) return true;
-    const haystack = clean(item.address) + ' ' + clean(item.code);
-    return terms.every((t) => haystack.includes(t));
+    // Recherche sur l'adresse seule : chercher « 69 » ne doit pas remonter
+    // toutes les fiches dont le code contient 69.
+    const target = clean(item.address);
+    return terms.every((t) => target.includes(t));
   });
 
   filtered.sort((x, y) =>
