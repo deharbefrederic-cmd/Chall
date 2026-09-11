@@ -1,48 +1,192 @@
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
-}
+'use strict';
+
+/* ------------------------------------------------------------------ *
+ * Challivretou — client
+ * Écritures unitaires (une fiche = une requête), lecture hors ligne,
+ * file d'attente rejouée au retour du réseau, rendu DOM sans innerHTML.
+ * ------------------------------------------------------------------ */
+
+const CACHE_KEY = 'chall_cache_v2';
+const OUTBOX_KEY = 'chall_outbox_v2';
+const ACCESS_KEY = 'chall_access_key';
+const CLIENT_KEY = 'chall_client_id';
+const RECENT_MS = 7 * 24 * 60 * 60 * 1000;
+const DELETE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 let records = [];
-let editingIndex = null;
+let editingId = null;
+let filterRecentOnly = false;
+let isBusy = false;
 let toastTimeout;
 let deferredPrompt = null;
-let filterRecentOnly = false;
-let isSaving = false;
 
-const searchInput = document.getElementById('searchInput');
-const clearBtn = document.getElementById('clearBtn');
-const codeList = document.getElementById('codeList');
-const itemCount = document.getElementById('itemCount');
-const syncStatus = document.getElementById('syncStatus');
-const editModal = document.getElementById('editModal');
-const modalAddress = document.getElementById('modalAddress');
-const modalCode = document.getElementById('modalCode');
-const modalTitle = document.getElementById('modalTitle');
-const deleteBtn = document.getElementById('deleteBtn');
-const hsToggleBtn = document.getElementById('hsToggleBtn');
-const saveBtn = document.getElementById('saveModal');
-const toast = document.getElementById('toast');
-const installBtn = document.getElementById('installBtn');
-const installPopupModal = document.getElementById('installPopupModal');
-const confirmInstallPopup = document.getElementById('confirmInstallPopup');
-const dismissInstallPopup = document.getElementById('dismissInstallPopup');
-const filterRecentBtn = document.getElementById('filterRecentBtn');
+const $ = (id) => document.getElementById(id);
 
-// --- Système de dialogue intégré SANS mention d'URL ---
-function showCustomDialog({ title, message, showCancel = true, okText = "OK", cancelText = "Annuler" }) {
+const searchInput = $('searchInput');
+const clearBtn = $('clearBtn');
+const codeList = $('codeList');
+const itemCount = $('itemCount');
+const syncStatus = $('syncStatus');
+const editModal = $('editModal');
+const modalAddress = $('modalAddress');
+const modalCode = $('modalCode');
+const modalTitle = $('modalTitle');
+const deleteBtn = $('deleteBtn');
+const hsToggleBtn = $('hsToggleBtn');
+const saveBtn = $('saveModal');
+const toast = $('toast');
+const installBtn = $('installBtn');
+const installPopupModal = $('installPopupModal');
+const filterRecentBtn = $('filterRecentBtn');
+const gateModal = $('gateModal');
+const gateInput = $('gateInput');
+const gateError = $('gateError');
+const gateSubmit = $('gateSubmit');
+
+/* ------------------------------- stockage ------------------------------- */
+
+function getClientId() {
+  let id = localStorage.getItem(CLIENT_KEY);
+  if (!id) {
+    id = (crypto.randomUUID ? crypto.randomUUID() : 'c' + Date.now() + Math.random().toString(36).slice(2))
+      .replace(/[^A-Za-z0-9_-]/g, '');
+    localStorage.setItem(CLIENT_KEY, id);
+  }
+  return id;
+}
+
+const getAccessKey = () => localStorage.getItem(ACCESS_KEY) || '';
+
+/**
+ * Lien d'invitation : https://…/#k=LA_CLE
+ * La clé est lue une seule fois, stockée sur l'appareil, puis effacée de la
+ * barre d'adresse. Le livreur ne saisit jamais rien.
+ * Le fragment (#) n'est pas transmis au serveur : la clé n'apparaît donc
+ * dans aucun journal côté Cloudflare.
+ */
+function consumeKeyFromUrl() {
+  let key = null;
+
+  const fromHash = (location.hash || '').match(/[#&]k=([^&]+)/);
+  if (fromHash) key = decodeURIComponent(fromHash[1]);
+  else key = new URLSearchParams(location.search || '').get('k');
+
+  if (!key) return false;
+
+  localStorage.setItem(ACCESS_KEY, key.trim());
+  history.replaceState(null, '', location.pathname);
+  return true;
+}
+
+const buildInviteLink = () => location.origin + '/#k=' + encodeURIComponent(getAccessKey());
+
+function readJson(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* quota dépassé : on continue sans cache */
+  }
+}
+
+const loadCache = () => readJson(CACHE_KEY, []);
+const saveCache = () => writeJson(CACHE_KEY, records);
+const loadOutbox = () => readJson(OUTBOX_KEY, []);
+const saveOutbox = (ops) => writeJson(OUTBOX_KEY, ops);
+
+function enqueue(op) {
+  const ops = loadOutbox();
+  ops.push(op);
+  saveOutbox(ops);
+  updateStatus();
+}
+
+/* --------------------------------- API --------------------------------- */
+
+class ApiError extends Error {
+  constructor(status, payload) {
+    super(payload?.message || 'Erreur réseau');
+    this.status = status;
+    this.payload = payload || {};
+  }
+}
+
+async function api(path, options = {}) {
+  const headers = {
+    'X-Chall-Key': getAccessKey(),
+    'X-Chall-Client': getClientId(),
+    ...(options.body ? { 'Content-Type': 'application/json' } : {})
+  };
+
+  const res = await fetch(path, { ...options, headers, cache: 'no-store' });
+
+  let payload = null;
+  try {
+    payload = await res.json();
+  } catch {
+    /* réponse sans corps JSON */
+  }
+
+  if (!res.ok) throw new ApiError(res.status, payload);
+  return payload;
+}
+
+/* ------------------------------- clé d'accès ----------------------------- */
+
+function openGate(message) {
+  gateError.textContent = message || '';
+  gateInput.value = '';
+  gateModal.style.display = 'flex';
+  gateInput.focus();
+}
+
+gateSubmit.addEventListener('click', async () => {
+  const value = gateInput.value.trim();
+  if (!value) return;
+
+  gateSubmit.disabled = true;
+  gateError.textContent = '';
+  localStorage.setItem(ACCESS_KEY, value);
+
+  try {
+    await api('/api/ping');
+    gateModal.style.display = 'none';
+    await loadData();
+    trackDeviceInstallation();
+  } catch (err) {
+    localStorage.removeItem(ACCESS_KEY);
+    gateError.textContent =
+      err.status === 401 ? "Clé refusée. Vérifiez auprès de l'équipe." : 'Serveur injoignable. Réessayez.';
+  } finally {
+    gateSubmit.disabled = false;
+  }
+});
+
+gateInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') gateSubmit.click();
+});
+
+/* ------------------------------- dialogues ------------------------------ */
+
+function showDialog({ title, message, showCancel = true, okText = 'OK', cancelText = 'Annuler' }) {
   return new Promise((resolve) => {
-    const modal = document.getElementById('dialogModal');
-    const titleEl = document.getElementById('dialogTitle');
-    const msgEl = document.getElementById('dialogMessage');
-    const cancelBtn = document.getElementById('dialogCancelBtn');
-    const okBtn = document.getElementById('dialogOkBtn');
+    const modal = $('dialogModal');
+    const okBtn = $('dialogOkBtn');
+    const cancelBtn = $('dialogCancelBtn');
 
-    titleEl.textContent = title || '';
-    msgEl.textContent = message || '';
+    $('dialogTitle').textContent = title || '';
+    $('dialogMessage').textContent = message || '';
     okBtn.textContent = okText;
     cancelBtn.textContent = cancelText;
     cancelBtn.style.display = showCancel ? 'block' : 'none';
-
     modal.style.display = 'flex';
 
     const cleanup = () => {
@@ -50,7 +194,6 @@ function showCustomDialog({ title, message, showCancel = true, okText = "OK", ca
       okBtn.removeEventListener('click', onOk);
       cancelBtn.removeEventListener('click', onCancel);
     };
-
     const onOk = () => { cleanup(); resolve(true); };
     const onCancel = () => { cleanup(); resolve(false); };
 
@@ -59,424 +202,524 @@ function showCustomDialog({ title, message, showCancel = true, okText = "OK", ca
   });
 }
 
-// --- Suivi des installations et utilisateurs Web ---
-async function trackDeviceInstallation() {
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-  const ua = navigator.userAgent || '';
-
-  if (isStandalone) {
-    if (!localStorage.getItem('chall_installed_reported')) {
-      const platform = /android/i.test(ua) ? 'android' : (/iphone|ipad|ipod/i.test(ua) ? 'ios' : null);
-      if (platform) {
-        try {
-          await fetch('/api/stats', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'install', platform })
-          });
-          localStorage.setItem('chall_installed_reported', 'true');
-        } catch (e) {}
-      }
-    }
-  } else {
-    if (!localStorage.getItem('chall_web_reported') && !localStorage.getItem('chall_installed_reported')) {
-      try {
-        await fetch('/api/stats', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'web' })
-        });
-        localStorage.setItem('chall_web_reported', 'true');
-      } catch (e) {}
-    }
-  }
+function showToast(message) {
+  toast.textContent = message;
+  toast.className = 'show';
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => { toast.className = ''; }, 1800);
 }
 
-trackDeviceInstallation();
-
-window.addEventListener('appinstalled', async () => {
-  installBtn.style.display = 'none';
-  installPopupModal.style.display = 'none';
-  deferredPrompt = null;
-
-  if (!localStorage.getItem('chall_installed_reported')) {
-    try {
-      await fetch('/api/stats', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'install', platform: 'android' })
-      });
-      localStorage.setItem('chall_installed_reported', 'true');
-    } catch (e) {}
-  }
-});
-
-// Commande admin #stats sans URL
-async function checkAdminStatsCommand(val) {
-  if (val.trim().toLowerCase() === '#stats') {
-    searchInput.value = '';
-    renderList();
-    try {
-      const res = await fetch('/api/stats');
-      const data = await res.json();
-      const android = data.android || 0;
-      const ios = data.ios || 0;
-      const web = data.web || 0;
-      const totalInstalls = android + ios;
-      const totalGlobal = totalInstalls + web;
-
-      await showCustomDialog({
-        title: "📊 Statistiques Challivretou",
-        message: `🤖 Appli Android : ${android}\n🍏 Appli Apple : ${ios}\n📱 Sous-total installés : ${totalInstalls}\n\n🌐 Navigateur URL : ${web}\n\n👥 Total utilisateurs uniques : ${totalGlobal}`,
-        showCancel: false,
-        okText: "Fermer"
-      });
-    } catch (e) {
-      await showCustomDialog({
-        title: "Erreur",
-        message: "Impossible de charger les statistiques.",
-        showCancel: false
-      });
-    }
-  }
-}
-
-function getMyCreatedIds() {
-  try {
-    return JSON.parse(localStorage.getItem('chall_my_creations') || '[]');
-  } catch (e) {
-    return [];
-  }
-}
-
-function recordMyCreation(id) {
-  const ids = getMyCreatedIds();
-  ids.push(id);
-  localStorage.setItem('chall_my_creations', JSON.stringify(ids));
-}
+/* ------------------------- recherche et doublons ------------------------ */
 
 function clean(str) {
-  return (str || '').trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return (str || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
-function extractCoreAddress(str) {
-  let s = clean(str);
-  s = s.replace(/\b(avenue|ave|av|boulevard|bd|blvd|rue|r|chemin|che|ch|impasse|imp|route|rte|traverse|allee|place|cours|montee|vieux chemin)\b/g, ' ');
-  s = s.replace(/[^a-z0-9]/g, ' ');
-  return s.replace(/\s+/g, ' ').trim();
+const STREET_TYPES =
+  /\b(avenue|ave|av|boulevard|bd|blvd|rue|chemin|che|ch|impasse|imp|route|rte|traverse|allee|place|cours|montee|residence|res|batiment|bat|corniche|quai|square|villa|passage)\b/g;
+
+// Mots trop fréquents pour distinguer deux adresses.
+const STOPWORDS = new Set([
+  'de', 'des', 'du', 'la', 'le', 'les', 'aux', 'au', 'et', 'en', 'sur', 'sous',
+  'saint', 'sainte', 'st', 'ste', 'general', 'grand', 'grande', 'vieux', 'vieille', 'petit', 'petite'
+]);
+
+function coreTokens(str) {
+  const base = clean(str).replace(STREET_TYPES, ' ').replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+  const number = (base.match(/\d+/) || [''])[0];
+  const words = base
+    .split(' ')
+    .filter((w) => w && w !== number && w.length >= 3 && !STOPWORDS.has(w));
+  return { base, number, words };
 }
 
-function findSimilarAddress(newAddr, currentIndex = null) {
-  const coreNew = extractCoreAddress(newAddr);
-  const numNew = (coreNew.match(/\d+/) || [''])[0];
-  const wordsNew = coreNew.split(' ').filter(w => w !== numNew && w.length >= 2);
+/**
+ * Suggère une fiche existante à mettre à jour plutôt que de créer un doublon.
+ * Le rapprochement approximatif n'a lieu qu'entre adresses portant le même
+ * numéro de voie, et exige que les mots significatifs de l'une soient inclus
+ * dans ceux de l'autre — « 12 rue des Fleurs » ne matche plus « 12 av des Roses ».
+ */
+function findSimilarAddress(address, ignoreId = null) {
+  const a = coreTokens(address);
 
-  for (let i = 0; i < records.length; i++) {
-    if (currentIndex !== null && i === currentIndex) continue;
+  for (const item of records) {
+    if (ignoreId && item.id === ignoreId) continue;
 
-    const existing = records[i];
-    const coreExisting = extractCoreAddress(existing.a);
-    const numExisting = (coreExisting.match(/\d+/) || [''])[0];
+    const b = coreTokens(item.address);
+    if (a.base === b.base) return item;
 
-    if (numNew && numExisting && numNew !== numExisting) continue;
+    if (!a.number || !b.number || a.number !== b.number) continue;
+    if (!a.words.length || !b.words.length) continue;
 
-    if (coreNew === coreExisting) {
-      return { item: existing, index: i };
-    }
-
-    const wordsExisting = coreExisting.split(' ').filter(w => w !== numExisting && w.length >= 2);
-    if (numNew && numNew === numExisting && wordsNew.length > 0 && wordsExisting.length > 0) {
-      const match = wordsNew.some(w => wordsExisting.includes(w));
-      if (match) return { item: existing, index: i };
-    }
+    const shared = a.words.filter((w) => b.words.includes(w));
+    if (shared.length && shared.length === Math.min(a.words.length, b.words.length)) return item;
   }
   return null;
 }
 
+/* -------------------------------- rendu -------------------------------- */
+
 function formatUpdateDate(ts) {
   if (!ts) return null;
-  const diffDays = Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
-  if (diffDays === 0) return "Aujourd'hui";
-  if (diffDays === 1) return "Hier";
-  if (diffDays < 7) return `Il y a ${diffDays} j`;
+  const days = Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
+  if (days <= 0) return "Aujourd'hui";
+  if (days === 1) return 'Hier';
+  if (days < 7) return `Il y a ${days} j`;
   return new Date(ts).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
 }
 
-filterRecentBtn.addEventListener('click', () => {
-  filterRecentOnly = !filterRecentOnly;
-  filterRecentBtn.classList.toggle('active', filterRecentOnly);
-  renderList();
-});
-
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  deferredPrompt = e;
-  installBtn.style.display = 'inline-block';
-  if (!localStorage.getItem('pwa_prompt_shown')) {
-    localStorage.setItem('pwa_prompt_shown', 'true');
-    installPopupModal.style.display = 'flex';
-  }
-});
-
-confirmInstallPopup.addEventListener('click', async () => {
-  installPopupModal.style.display = 'none';
-  if (!deferredPrompt) return;
-  deferredPrompt.prompt();
-  const { outcome } = await deferredPrompt.userChoice;
-  if (outcome === 'accepted') installBtn.style.display = 'none';
-  deferredPrompt = null;
-});
-
-dismissInstallPopup.addEventListener('click', () => {
-  installPopupModal.style.display = 'none';
-});
-
-installBtn.addEventListener('click', async () => {
-  if (!deferredPrompt) return;
-  deferredPrompt.prompt();
-  const { outcome } = await deferredPrompt.userChoice;
-  if (outcome === 'accepted') installBtn.style.display = 'none';
-  deferredPrompt = null;
-});
-
-async function loadData() {
-  try {
-    const res = await fetch('/api/codes');
-    records = await res.json();
-    if (!Array.isArray(records)) records = [];
-    syncStatus.textContent = "🟢 À jour";
-  } catch (e) {
-    syncStatus.textContent = "🔴 Hors ligne";
-  }
-  renderList();
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text; // jamais innerHTML : pas d'injection possible
+  return node;
 }
 
-async function syncToServer() {
-  syncStatus.textContent = "⏳ Envoi...";
-  try {
-    await fetch('/api/codes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(records)
-    });
-    syncStatus.textContent = "🟢 À jour";
-  } catch (e) {
-    syncStatus.textContent = "⚠️ Échec sync";
-  }
-  renderList();
+function buildCard(item) {
+  const isHS = Boolean(item.hs);
+  const isRecent = item.updatedAt && Date.now() - item.updatedAt < RECENT_MS;
+
+  const card = el('div', 'card' + (isHS ? ' is-hs' : ''));
+  const info = el('div', 'card-info');
+  info.appendChild(el('div', 'address', item.address));
+
+  const row = el('div', 'code-row');
+  row.appendChild(el('div', 'code-badge' + (isHS ? ' hs' : ''), (isHS ? '⚠️ ' : '') + item.code));
+  if (isHS) row.appendChild(el('span', 'badge-tag badge-hs-alert', 'Code HS'));
+  if (isRecent) row.appendChild(el('span', 'badge-tag badge-recent', 'MAJ'));
+  info.appendChild(row);
+
+  const dateLabel = formatUpdateDate(item.updatedAt);
+  if (dateLabel) info.appendChild(el('div', 'updated-date', '🕒 Modifié : ' + dateLabel));
+
+  const actions = el('div', 'actions');
+
+  const copyBtn = el('button', 'btn-action', '📋');
+  copyBtn.type = 'button';
+  copyBtn.setAttribute('aria-label', 'Copier le code de ' + item.address);
+  copyBtn.addEventListener('click', () => copyCode(item.code));
+
+  const editBtn = el('button', 'btn-action', '✏️');
+  editBtn.type = 'button';
+  editBtn.setAttribute('aria-label', 'Modifier ' + item.address);
+  editBtn.addEventListener('click', () => openEdit(item.id));
+
+  actions.append(copyBtn, editBtn);
+  card.append(info, actions);
+  return card;
 }
 
 function renderList() {
-  const query = clean(searchInput.value);
-  const terms = query.split(/\s+/).filter(Boolean);
+  const terms = clean(searchInput.value).split(/\s+/).filter(Boolean);
 
-  let filtered = records.filter(item => {
-    if (filterRecentOnly && !item.u) return false;
+  let filtered = records.filter((item) => {
+    if (filterRecentOnly && !item.updatedAt) return false;
     if (!terms.length) return true;
-    const target = clean(item.a || '');
-    return terms.every(t => target.includes(t));
+    const haystack = clean(item.address) + ' ' + clean(item.code);
+    return terms.every((t) => haystack.includes(t));
   });
 
-  if (filterRecentOnly) {
-    filtered.sort((x, y) => (y.u || 0) - (x.u || 0));
+  filtered.sort((x, y) =>
+    filterRecentOnly
+      ? (y.updatedAt || 0) - (x.updatedAt || 0)
+      : (x.address || '').localeCompare(y.address || '', 'fr', { numeric: true, sensitivity: 'base' })
+  );
+
+  itemCount.textContent = `${filtered.length} résultat${filtered.length > 1 ? 's' : ''}`;
+
+  const fragment = document.createDocumentFragment();
+  if (!filtered.length) {
+    fragment.appendChild(
+      el('div', 'empty-state', records.length ? 'Aucune adresse ne correspond.' : 'Aucune adresse enregistrée. Appuyez sur + pour en ajouter une.')
+    );
   } else {
-    filtered.sort((x, y) => (x.a || '').localeCompare(y.a || '', 'fr', { numeric: true, sensitivity: 'base' }));
+    filtered.forEach((item) => fragment.appendChild(buildCard(item)));
   }
 
-  itemCount.textContent = `${filtered.length} résultat(s)`;
-  codeList.innerHTML = '';
-
-  filtered.forEach(item => {
-    const originalIdx = records.indexOf(item);
-    const dateLabel = formatUpdateDate(item.u);
-    const isRecent = item.u && (Date.now() - item.u < 7 * 24 * 60 * 60 * 1000);
-    const isHS = Boolean(item.hs);
-
-    const card = document.createElement('div');
-    card.className = 'card' + (isHS ? ' is-hs' : '');
-    card.innerHTML = `
-      <div class="card-info">
-        <div class="address">${item.a}</div>
-        <div class="code-row">
-          <div class="code-badge ${isHS ? 'hs' : ''}">${isHS ? '⚠️ ' + item.c : item.c}</div>
-          ${isHS ? '<span class="badge-tag badge-hs-alert">Code HS</span>' : ''}
-          ${isRecent ? '<span class="badge-tag badge-recent">MAJ</span>' : ''}
-        </div>
-        ${dateLabel ? `<div class="updated-date">🕒 Modifié : ${dateLabel}</div>` : ''}
-      </div>
-      <div class="actions">
-        <button class="btn-action" onclick="copyCode('${(item.c || '').replace(/'/g, "\\'")}')">📋</button>
-        <button class="btn-action" onclick="openEdit(${originalIdx})">✏️</button>
-      </div>
-    `;
-    codeList.appendChild(card);
-  });
+  codeList.replaceChildren(fragment);
 }
 
-window.copyCode = function(val) {
-  navigator.clipboard.writeText(val);
-  toast.textContent = 'Code copié : ' + val;
-  toast.className = 'show';
-  clearTimeout(toastTimeout);
-  toastTimeout = setTimeout(() => { toast.className = ''; }, 1500);
-};
+function updateStatus(text) {
+  if (text) {
+    syncStatus.textContent = text;
+    return;
+  }
+  const pending = loadOutbox().length;
+  if (pending) syncStatus.textContent = `📦 ${pending} en attente`;
+  else if (!navigator.onLine) syncStatus.textContent = '🔴 Hors ligne';
+  else syncStatus.textContent = '🟢 À jour';
+}
 
-window.openEdit = function(idx) {
-  editingIndex = idx;
-  const item = records[idx];
-  modalTitle.textContent = "Modifier l'adresse";
-  modalAddress.value = item.a;
-  modalCode.value = item.c;
+async function copyCode(value) {
+  try {
+    await navigator.clipboard.writeText(value);
+    showToast('Code copié : ' + value);
+  } catch {
+    showToast('Code : ' + value); // clipboard refusé hors HTTPS ou sans geste utilisateur
+  }
+}
 
-  const myCreations = getMyCreatedIds();
-  const isMine = item.id && myCreations.includes(item.id);
-  const isUnder24h = item.created && (Date.now() - item.created < 24 * 60 * 60 * 1000);
-  deleteBtn.style.display = (isMine && isUnder24h) ? 'block' : 'none';
+/* ------------------------ chargement et synchro ------------------------- */
 
-  hsToggleBtn.style.display = 'block';
-  if (item.hs) {
-    hsToggleBtn.textContent = '✅ Code valide';
-    hsToggleBtn.style.background = '#059669';
-  } else {
-    hsToggleBtn.textContent = '⚠️ Signaler HS';
-    hsToggleBtn.style.background = '#d97706';
+async function loadData({ silent = false } = {}) {
+  if (!silent) updateStatus('⏳ Connexion...');
+
+  try {
+    const data = await api('/api/codes');
+    records = Array.isArray(data.records) ? data.records : [];
+    saveCache();
+    updateStatus();
+  } catch (err) {
+    if (err.status === 401) {
+      openGate('Clé refusée. Saisissez la clé à jour.');
+      return;
+    }
+    // Réseau indisponible : on garde le dernier état connu, l'appli reste utilisable.
+    if (!records.length) records = loadCache();
+    updateStatus(navigator.onLine ? '⚠️ Serveur injoignable' : '🔴 Hors ligne');
   }
 
-  editModal.style.display = 'flex';
-};
+  renderList();
+}
 
-document.getElementById('openAddModal').addEventListener('click', () => {
-  editingIndex = null;
-  modalTitle.textContent = "Ajouter un code";
+function sendOp(op) {
+  if (op.kind === 'create') {
+    return api('/api/codes', {
+      method: 'POST',
+      body: JSON.stringify({ id: op.id, address: op.address, code: op.code })
+    });
+  }
+  if (op.kind === 'patch') {
+    return api('/api/codes/' + encodeURIComponent(op.id), {
+      method: 'PATCH',
+      body: JSON.stringify(op.patch)
+    });
+  }
+  return api('/api/codes/' + encodeURIComponent(op.id), { method: 'DELETE' });
+}
+
+/** Rejoue la file dans l'ordre. Les ops rejetées définitivement sont abandonnées. */
+async function flushOutbox() {
+  let ops = loadOutbox();
+  if (!ops.length) return true;
+
+  updateStatus('⏳ Envoi...');
+  const dropped = [];
+
+  while (ops.length) {
+    const op = ops[0];
+    try {
+      await sendOp(op);
+      ops.shift();
+      saveOutbox(ops);
+    } catch (err) {
+      if (err.status === 401) {
+        openGate('Clé refusée. Saisissez la clé à jour.');
+        return false;
+      }
+      if (err.status === 429 || err.status === undefined || err.status >= 500) {
+        updateStatus(); // problème temporaire : on retentera plus tard
+        return false;
+      }
+      dropped.push({ op, message: err.message });
+      ops.shift();
+      saveOutbox(ops);
+    }
+  }
+
+  if (dropped.length) {
+    showToast(`${dropped.length} modification(s) refusée(s)`);
+    await showDialog({
+      title: 'Modifications non enregistrées',
+      message: dropped.map((d) => '• ' + d.message).join('\n'),
+      showCancel: false,
+      okText: 'Compris'
+    });
+  }
+  return true;
+}
+
+/**
+ * Applique une opération : envoi immédiat si possible, mise en file sinon.
+ * Dans les deux cas l'écran est mis à jour tout de suite.
+ */
+async function commit(op, optimistic) {
+  optimistic();
+  saveCache();
+  renderList();
+
+  try {
+    const result = await sendOp(op);
+    if (result && result.record) {
+      const idx = records.findIndex((r) => r.id === result.record.id);
+      if (idx !== -1) records[idx] = result.record;
+      saveCache();
+      renderList();
+    }
+    updateStatus();
+    return { ok: true };
+  } catch (err) {
+    if (err.status === 401) {
+      openGate('Clé refusée. Saisissez la clé à jour.');
+      return { ok: false, err };
+    }
+    // Coupure réseau ou serveur momentanément indisponible : on garde l'op.
+    if (err.status === undefined || err.status >= 500 || err.status === 429) {
+      enqueue(op);
+      showToast('Hors ligne — envoi différé');
+      return { ok: true, queued: true };
+    }
+    // Refus définitif (doublon, droits, validation) : on resynchronise.
+    await loadData({ silent: true });
+    return { ok: false, err };
+  }
+}
+
+/* ------------------------------- actions -------------------------------- */
+
+$('openAddModal').addEventListener('click', () => {
+  editingId = null;
+  modalTitle.textContent = 'Ajouter un code';
   modalAddress.value = '';
   modalCode.value = '';
   deleteBtn.style.display = 'none';
   hsToggleBtn.style.display = 'none';
   editModal.style.display = 'flex';
+  modalAddress.focus();
 });
 
-document.getElementById('cancelModal').addEventListener('click', () => {
+$('cancelModal').addEventListener('click', () => {
   editModal.style.display = 'none';
 });
+
+function openEdit(id) {
+  const item = records.find((r) => r.id === id);
+  if (!item) return;
+
+  editingId = id;
+  modalTitle.textContent = "Modifier l'adresse";
+  modalAddress.value = item.address;
+  modalCode.value = item.code;
+
+  const canDelete = item.isMine && item.createdAt && Date.now() - item.createdAt < DELETE_WINDOW_MS;
+  deleteBtn.style.display = canDelete ? 'block' : 'none';
+
+  hsToggleBtn.style.display = 'block';
+  hsToggleBtn.textContent = item.hs ? '✅ Code valide' : '⚠️ Signaler HS';
+  hsToggleBtn.style.background = item.hs ? '#059669' : '#d97706';
+
+  editModal.style.display = 'flex';
+}
 
 hsToggleBtn.addEventListener('click', async () => {
-  if (editingIndex === null || isSaving) return;
-  isSaving = true;
-  const item = records[editingIndex];
-  item.hs = !item.hs;
+  if (!editingId || isBusy) return;
+  const item = records.find((r) => r.id === editingId);
+  if (!item) return;
+
+  isBusy = true;
+  const next = !item.hs;
   editModal.style.display = 'none';
-  await syncToServer();
-  toast.textContent = item.hs ? 'Portail signalé HS' : 'Portail rétabli';
-  toast.className = 'show';
-  setTimeout(() => { toast.className = ''; }, 1500);
-  isSaving = false;
+
+  const res = await commit(
+    { kind: 'patch', id: item.id, patch: { hs: next } },
+    () => { item.hs = next; }
+  );
+
+  if (res.ok) showToast(next ? 'Portail signalé HS' : 'Portail rétabli');
+  else showToast(res.err.message);
+  isBusy = false;
 });
 
-// Suppression avec dialogue propre
 deleteBtn.addEventListener('click', async () => {
-  if (editingIndex === null || isSaving) return;
-  const item = records[editingIndex];
+  if (!editingId || isBusy) return;
+  const item = records.find((r) => r.id === editingId);
+  if (!item) return;
 
-  const confirmed = await showCustomDialog({
-    title: "Confirmer la suppression",
-    message: `Voulez-vous vraiment supprimer définitivement "${item.a}" ?`,
-    okText: "Supprimer",
-    cancelText: "Annuler"
+  const confirmed = await showDialog({
+    title: 'Confirmer la suppression',
+    message: `Supprimer définitivement « ${item.address} » ?`,
+    okText: 'Supprimer',
+    cancelText: 'Annuler'
   });
+  if (!confirmed) return;
 
-  if (confirmed) {
-    isSaving = true;
-    records.splice(editingIndex, 1);
-    editModal.style.display = 'none';
-    await syncToServer();
-    toast.textContent = 'Adresse supprimée';
-    toast.className = 'show';
-    setTimeout(() => { toast.className = ''; }, 1500);
-    isSaving = false;
-  }
+  isBusy = true;
+  editModal.style.display = 'none';
+  const res = await commit(
+    { kind: 'delete', id: item.id },
+    () => { records = records.filter((r) => r.id !== item.id); }
+  );
+
+  showToast(res.ok ? 'Adresse supprimée' : res.err.message);
+  isBusy = false;
 });
 
-// Sauvegarde avec fusion et dialogue propre SANS URL
 saveBtn.addEventListener('click', async () => {
-  if (isSaving) return;
-  const a = modalAddress.value.trim();
-  const c = modalCode.value.trim();
+  if (isBusy) return;
 
-  if (!a || !c) {
-    await showCustomDialog({
-      title: "Champs incomplets",
-      message: "Veuillez renseigner à la fois l'adresse et le code.",
+  const address = modalAddress.value.trim();
+  const code = modalCode.value.trim();
+
+  if (!address || !code) {
+    await showDialog({
+      title: 'Champs incomplets',
+      message: "Renseignez l'adresse et le code.",
       showCancel: false,
-      okText: "Compris"
+      okText: 'Compris'
     });
     return;
   }
 
-  const now = Date.now();
-
-  if (editingIndex === null) {
-    const match = findSimilarAddress(a);
-    if (match) {
-      const existing = match.item;
-      const shouldUpdate = await showCustomDialog({
-        title: "⚠️ Adresse similaire trouvée",
-        message: `"${existing.a}" existe déjà avec le code : ${existing.c}\n\nSouhaitez-vous METTRE À JOUR son code avec "${c}" plutôt que de créer un doublon ?`,
-        okText: "Mettre à jour",
-        cancelText: "Créer à part"
-      });
-
-      if (shouldUpdate) {
-        isSaving = true;
-        saveBtn.disabled = true;
-        existing.c = c;
-        existing.u = now;
-        existing.hs = false;
-        editModal.style.display = 'none';
-        await syncToServer();
-        saveBtn.disabled = false;
-        isSaving = false;
-        toast.textContent = 'Fiche existante mise à jour !';
-        toast.className = 'show';
-        setTimeout(() => { toast.className = ''; }, 1500);
-        return;
-      }
-    }
-  }
-
-  isSaving = true;
+  isBusy = true;
   saveBtn.disabled = true;
 
-  if (editingIndex !== null) {
-    const prev = records[editingIndex];
-    const hasCodeChanged = (clean(prev.c) !== clean(c));
-    records[editingIndex] = {
-      ...prev,
-      a,
-      c,
-      hs: hasCodeChanged ? false : Boolean(prev.hs),
-      u: (prev.a !== a || hasCodeChanged) ? now : prev.u
-    };
-  } else {
-    const newId = 'id_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-    recordMyCreation(newId);
-    records.push({ 
-      id: newId,
-      a, 
-      c, 
-      u: now, 
-      created: now,
-      hs: false 
-    });
-  }
+  try {
+    if (editingId === null) {
+      const similar = findSimilarAddress(address);
+      if (similar) {
+        const shouldUpdate = await showDialog({
+          title: '⚠️ Adresse similaire trouvée',
+          message: `« ${similar.address} » existe déjà avec le code ${similar.code}.\n\nMettre à jour cette fiche avec « ${code} » plutôt que créer un doublon ?`,
+          okText: 'Mettre à jour',
+          cancelText: 'Créer à part'
+        });
 
-  editModal.style.display = 'none';
-  await syncToServer();
-  saveBtn.disabled = false;
-  isSaving = false;
+        if (shouldUpdate) {
+          editModal.style.display = 'none';
+          const res = await commit(
+            { kind: 'patch', id: similar.id, patch: { code } },
+            () => { similar.code = code; similar.hs = false; similar.updatedAt = Date.now(); }
+          );
+          showToast(res.ok ? 'Fiche existante mise à jour' : res.err.message);
+          return;
+        }
+      }
+
+      const id = getClientId().slice(0, 8) + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      const now = Date.now();
+      editModal.style.display = 'none';
+
+      const res = await commit(
+        { kind: 'create', id, address, code },
+        () => {
+          records.push({ id, address, code, hs: false, createdAt: now, updatedAt: now, isMine: true });
+        }
+      );
+
+      if (!res.ok) {
+        const existing = res.err.payload && res.err.payload.record;
+        await showDialog({
+          title: 'Adresse déjà enregistrée',
+          message: existing
+            ? `« ${existing.address} » existe déjà avec le code ${existing.code}.`
+            : res.err.message,
+          showCancel: false,
+          okText: 'Compris'
+        });
+      } else {
+        showToast('Adresse ajoutée');
+      }
+      return;
+    }
+
+    const item = records.find((r) => r.id === editingId);
+    if (!item) return;
+
+    if (item.address === address && item.code === code) {
+      editModal.style.display = 'none';
+      return;
+    }
+
+    editModal.style.display = 'none';
+    const res = await commit(
+      { kind: 'patch', id: item.id, patch: { address, code } },
+      () => {
+        const codeChanged = item.code !== code;
+        item.address = address;
+        item.code = code;
+        if (codeChanged) item.hs = false;
+        item.updatedAt = Date.now();
+      }
+    );
+
+    showToast(res.ok ? 'Fiche mise à jour' : res.err.message);
+  } finally {
+    saveBtn.disabled = false;
+    isBusy = false;
+  }
 });
 
+/* ------------------------------ recherche ------------------------------- */
+
+async function checkAdminCommand(value) {
+  const command = value.trim().toLowerCase();
+
+  // Repartager l'accès à un collègue sans jamais retaper la clé.
+  if (command === '#lien') {
+    searchInput.value = '';
+    renderList();
+
+    const link = buildInviteLink();
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(link);
+      copied = true;
+    } catch {
+      /* presse-papiers refusé : le lien reste affiché */
+    }
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Challivretou', text: "Lien d'accès Challivretou", url: link });
+        return;
+      } catch {
+        /* partage annulé */
+      }
+    }
+
+    await showDialog({
+      title: copied ? "Lien d'accès copié" : "Lien d'accès",
+      message: link + '\n\nEnvoyez-le au collègue. Un simple clic suffit, rien à saisir.',
+      showCancel: false,
+      okText: 'Fermer'
+    });
+    return;
+  }
+
+  if (command !== '#stats') return;
+
+  searchInput.value = '';
+  renderList();
+
+  try {
+    const data = await api('/api/stats');
+    const android = data.android || 0;
+    const ios = data.ios || 0;
+    const web = data.web || 0;
+
+    await showDialog({
+      title: '📊 Statistiques Challivretou',
+      message:
+        `🤖 Android installé : ${android}\n` +
+        `🍏 iOS installé : ${ios}\n` +
+        `📱 Sous-total installé : ${android + ios}\n\n` +
+        `🌐 Navigateur : ${web}\n\n` +
+        `👥 Total : ${android + ios + web}`,
+      showCancel: false,
+      okText: 'Fermer'
+    });
+  } catch {
+    await showDialog({
+      title: 'Statistiques indisponibles',
+      message: 'Le serveur n’a pas répondu. Réessayez une fois en ligne.',
+      showCancel: false,
+      okText: 'Compris'
+    });
+  }
+}
+
 searchInput.addEventListener('input', (e) => {
-  checkAdminStatsCommand(e.target.value);
+  checkAdminCommand(e.target.value);
   renderList();
 });
 
@@ -486,4 +729,110 @@ clearBtn.addEventListener('click', () => {
   renderList();
 });
 
-loadData();
+filterRecentBtn.addEventListener('click', () => {
+  filterRecentOnly = !filterRecentOnly;
+  filterRecentBtn.classList.toggle('active', filterRecentOnly);
+  filterRecentBtn.setAttribute('aria-pressed', String(filterRecentOnly));
+  renderList();
+});
+
+/* ------------------------ installation et statistiques ------------------ */
+
+async function trackDeviceInstallation() {
+  if (!getAccessKey()) return;
+
+  const standalone =
+    window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  const ua = navigator.userAgent || '';
+
+  try {
+    if (standalone) {
+      if (localStorage.getItem('chall_installed_reported')) return;
+      const platform = /android/i.test(ua) ? 'android' : /iphone|ipad|ipod/i.test(ua) ? 'ios' : null;
+      if (!platform) return;
+      await api('/api/stats', { method: 'POST', body: JSON.stringify({ type: 'install', platform }) });
+      localStorage.setItem('chall_installed_reported', 'true');
+    } else {
+      if (localStorage.getItem('chall_web_reported') || localStorage.getItem('chall_installed_reported')) return;
+      await api('/api/stats', { method: 'POST', body: JSON.stringify({ type: 'web' }) });
+      localStorage.setItem('chall_web_reported', 'true');
+    }
+  } catch {
+    /* statistique non critique */
+  }
+}
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  installBtn.style.display = 'inline-block';
+  if (!localStorage.getItem('pwa_prompt_shown') && getAccessKey()) {
+    localStorage.setItem('pwa_prompt_shown', 'true');
+    installPopupModal.style.display = 'flex';
+  }
+});
+
+async function promptInstall() {
+  installPopupModal.style.display = 'none';
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  if (outcome === 'accepted') installBtn.style.display = 'none';
+  deferredPrompt = null;
+}
+
+$('confirmInstallPopup').addEventListener('click', promptInstall);
+installBtn.addEventListener('click', promptInstall);
+$('dismissInstallPopup').addEventListener('click', () => {
+  installPopupModal.style.display = 'none';
+});
+
+window.addEventListener('appinstalled', async () => {
+  installBtn.style.display = 'none';
+  installPopupModal.style.display = 'none';
+  deferredPrompt = null;
+
+  if (localStorage.getItem('chall_installed_reported')) return;
+  const platform = /iphone|ipad|ipod/i.test(navigator.userAgent) ? 'ios' : 'android';
+  try {
+    await api('/api/stats', { method: 'POST', body: JSON.stringify({ type: 'install', platform }) });
+    localStorage.setItem('chall_installed_reported', 'true');
+  } catch {
+    /* statistique non critique */
+  }
+});
+
+/* ------------------------------ démarrage ------------------------------- */
+
+window.addEventListener('online', async () => {
+  if (await flushOutbox()) await loadData({ silent: true });
+});
+window.addEventListener('offline', () => updateStatus());
+
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible' || !navigator.onLine || !getAccessKey()) return;
+  if (await flushOutbox()) await loadData({ silent: true });
+});
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+
+(async function start() {
+  // Une clé présente dans le lien est adoptée avant tout le reste.
+  consumeKeyFromUrl();
+
+  // Le cache s'affiche immédiatement : l'appli est lisible avant toute requête.
+  records = loadCache();
+  renderList();
+  updateStatus();
+
+  if (!getAccessKey()) {
+    openGate('');
+    return;
+  }
+
+  await flushOutbox();
+  await loadData();
+  trackDeviceInstallation();
+})();

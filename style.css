@@ -362,3 +362,34 @@ input[type="search"]:focus {
   opacity: 1; 
   bottom: 35px; 
 }
+
+/* --- Ajouts : état vide, clé d'accès, accessibilité clavier --- */
+
+.empty-state {
+  text-align: center;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 40px 20px;
+}
+
+.gate-error {
+  font-size: 13px;
+  color: #f87171;
+  min-height: 18px;
+  margin: -8px 0 8px;
+}
+
+#gateModal .modal-content input {
+  letter-spacing: 1px;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #toast { transition: none; }
+}
