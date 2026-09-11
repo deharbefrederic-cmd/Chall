@@ -228,6 +228,41 @@ const STOPWORDS = new Set([
   'saint', 'sainte', 'st', 'ste', 'general', 'grand', 'grande', 'vieux', 'vieille', 'petit', 'petite'
 ]);
 
+// Abréviations de voies : « bd » et « boulevard » doivent trouver la même chose.
+const ABBREVIATIONS = {
+  av: 'avenue', ave: 'avenue', aven: 'avenue',
+  bd: 'boulevard', bld: 'boulevard', blvd: 'boulevard', boul: 'boulevard',
+  r: 'rue',
+  ch: 'chemin', che: 'chemin', chem: 'chemin',
+  imp: 'impasse',
+  rte: 'route',
+  st: 'saint', ste: 'sainte',
+  pl: 'place',
+  all: 'allee', allée: 'allee',
+  res: 'residence', resid: 'residence',
+  bat: 'batiment', bt: 'batiment',
+  sq: 'square',
+  tra: 'traverse', trav: 'traverse',
+  crn: 'corniche',
+  mtee: 'montee',
+  qu: 'quai',
+  vla: 'villa',
+  psg: 'passage',
+  crs: 'cours',
+  esc: 'escalier',
+  bis: 'bis'
+};
+
+/** Texte ramené à une forme unique, abréviations développées. */
+function searchKey(str) {
+  return clean(str)
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((w) => ABBREVIATIONS[w] || w)
+    .join(' ');
+}
+
 function coreTokens(str) {
   const base = clean(str).replace(STREET_TYPES, ' ').replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
   const number = (base.match(/\d+/) || [''])[0];
@@ -314,14 +349,14 @@ function buildCard(item) {
 }
 
 function renderList() {
-  const terms = clean(searchInput.value).split(/\s+/).filter(Boolean);
+  const terms = searchKey(searchInput.value).split(' ').filter(Boolean);
 
   let filtered = records.filter((item) => {
     if (filterRecentOnly && !item.updatedAt) return false;
     if (!terms.length) return true;
-    // Recherche sur l'adresse seule : chercher « 69 » ne doit pas remonter
-    // toutes les fiches dont le code contient 69.
-    const target = clean(item.address);
+    // Adresse seule (chercher « 69 » ne doit pas remonter les codes),
+    // et abréviations développées des deux côtés.
+    const target = searchKey(item.address);
     return terms.every((t) => target.includes(t));
   });
 
@@ -481,6 +516,93 @@ async function commit(op, optimistic) {
   }
 }
 
+/* ------------------- suggestions d'adresses (Base Adresse Nationale) ------------------- */
+
+// Service public de l'IGN, gratuit et sans clé. Résultats limités à Nice.
+const NICE_INSEE = '06088';
+
+const suggestBox = document.createElement('div');
+suggestBox.style.cssText =
+  'display:none;margin:-6px 0 12px;border:1px solid #334155;border-radius:10px;' +
+  'background:#0f172a;max-height:190px;overflow-y:auto;';
+modalAddress.insertAdjacentElement('afterend', suggestBox);
+
+let suggestTimer = null;
+let suggestController = null;
+
+function hideSuggestions() {
+  suggestBox.style.display = 'none';
+  suggestBox.replaceChildren();
+}
+
+function showSuggestions(labels) {
+  if (!labels.length) {
+    hideSuggestions();
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+
+  labels.forEach((label) => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.textContent = label; // texte, jamais de HTML
+    row.style.cssText =
+      'display:block;width:100%;text-align:left;padding:11px 14px;background:transparent;' +
+      'border:0;border-bottom:1px solid #1e293b;color:#e2e8f0;font-size:14px;';
+    // pointerdown plutôt que click : se déclenche avant que le champ perde le focus.
+    row.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      modalAddress.value = label;
+      hideSuggestions();
+      modalCode.focus();
+    });
+    fragment.appendChild(row);
+  });
+
+  suggestBox.replaceChildren(fragment);
+  suggestBox.style.display = 'block';
+}
+
+async function fetchSuggestions(query) {
+  if (suggestController) suggestController.abort();
+  suggestController = new AbortController();
+
+  const url =
+    'https://data.geopf.fr/geocodage/search?index=address&limit=6&citycode=' +
+    NICE_INSEE +
+    '&q=' +
+    encodeURIComponent(query);
+
+  try {
+    // Requête vers un service tiers : aucun en-tête de l'application n'y est joint.
+    const res = await fetch(url, { signal: suggestController.signal });
+    if (!res.ok) return;
+
+    const data = await res.json();
+    const labels = [];
+    for (const feature of data.features || []) {
+      const props = feature.properties || {};
+      const label = props.name || props.label;
+      if (label && !labels.includes(label)) labels.push(label);
+    }
+    showSuggestions(labels);
+  } catch {
+    // Hors ligne, requête annulée ou service indisponible : la saisie libre reste possible.
+  }
+}
+
+modalAddress.addEventListener('input', () => {
+  clearTimeout(suggestTimer);
+  const query = modalAddress.value.trim();
+  if (query.length < 3 || !navigator.onLine) {
+    hideSuggestions();
+    return;
+  }
+  suggestTimer = setTimeout(() => fetchSuggestions(query), 250);
+});
+
+modalAddress.addEventListener('blur', () => setTimeout(hideSuggestions, 150));
+
 /* ------------------------------- actions -------------------------------- */
 
 $('openAddModal').addEventListener('click', () => {
@@ -490,11 +612,13 @@ $('openAddModal').addEventListener('click', () => {
   modalCode.value = '';
   deleteBtn.style.display = 'none';
   hsToggleBtn.style.display = 'none';
+  hideSuggestions();
   editModal.style.display = 'flex';
   modalAddress.focus();
 });
 
 $('cancelModal').addEventListener('click', () => {
+  hideSuggestions();
   editModal.style.display = 'none';
 });
 
@@ -514,6 +638,7 @@ function openEdit(id) {
   hsToggleBtn.textContent = item.hs ? '✅ Code valide' : '⚠️ Signaler HS';
   hsToggleBtn.style.background = item.hs ? '#059669' : '#d97706';
 
+  hideSuggestions();
   editModal.style.display = 'flex';
 }
 
