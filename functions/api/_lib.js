@@ -139,3 +139,38 @@ export async function touchDevice(db, id, platform) {
     .bind(id, platform, now)
     .run();
 }
+
+// Particules qui restent en minuscules sauf en début d'adresse.
+const PARTICULES = new Set(['de', 'du', 'des', 'la', 'le', 'les', 'au', 'aux', 'et', 'sur', 'sous', 'en']);
+
+// Types de voie collés au numéro : « 12rue » doit devenir « 12 rue ».
+const TYPES_VOIE =
+  'avenue|av|boulevard|bd|blvd|rue|chemin|impasse|route|traverse|allee|allée|place|cours|montee|montée|corniche|quai|square|villa|passage|residence|résidence';
+
+/**
+ * Met une adresse en forme : espaces et majuscules là où il faut.
+ * Prudent par construction : un mot contenant déjà une majuscule n'est jamais
+ * retouché, pour ne pas transformer « Code WC » en « Code Wc ».
+ */
+export function formatAddress(str) {
+  let out = str;
+
+  // 1. espace manquant entre le numéro et le type de voie
+  out = out.replace(new RegExp('\\b(\\d+)(' + TYPES_VOIE + ')\\b', 'gi'), '$1 $2');
+
+  // 2. espaces autour des séparateurs
+  out = out.replace(/\s*\/\s*/g, '/').replace(/\s*-\s*/g, '-').replace(/\s+/g, ' ').trim();
+
+  // 3. majuscules, en laissant intact tout mot qui en contient déjà une
+  const mots = out.split(' ');
+  out = mots
+    .map((mot, i) => {
+      if (/[A-ZÀ-Þ]/.test(mot)) return mot;
+      if (i > 0 && PARTICULES.has(mot)) return mot;
+      // capitalise aussi après un tiret : saint-jean -> Saint-Jean
+      return mot.replace(/(^|[-'])([a-zà-ÿ])/g, (m, sep, c) => sep + c.toUpperCase());
+    })
+    .join(' ');
+
+  return out;
+}
