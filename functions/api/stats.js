@@ -1,40 +1,37 @@
-function getKV(env) {
-  return env.CODES_KV || env.CODES || env.KV || Object.values(env).find(v => v && typeof v.get === 'function');
-}
+import { json, readJson, rateLimit, ipBucket } from './_lib.js';
+
+const KEYS = ['android', 'ios', 'web'];
 
 export async function onRequestGet(context) {
-  const kv = getKV(context.env);
-  if (!kv) return new Response(JSON.stringify({ error: "KV non trouvé" }), { status: 500 });
+  const { results } = await context.env.DB
+    .prepare(`SELECT key, value FROM stats WHERE key IN ('android','ios','web')`)
+    .all();
 
-  const raw = await kv.get("stats_installs");
-  const stats = raw ? JSON.parse(raw) : { android: 0, ios: 0, web: 0 };
+  const stats = { android: 0, ios: 0, web: 0 };
+  for (const row of results || []) stats[row.key] = row.value;
 
-  return new Response(JSON.stringify(stats), {
-    headers: { "Content-Type": "application/json" }
-  });
+  return json(stats);
 }
 
 export async function onRequestPost(context) {
-  const kv = getKV(context.env);
-  if (!kv) return new Response(JSON.stringify({ error: "KV non trouvé" }), { status: 500 });
+  const { request, env } = context;
 
-  try {
-    const { type, platform } = await context.request.json();
-    const raw = await kv.get("stats_installs");
-    const stats = raw ? JSON.parse(raw) : { android: 0, ios: 0, web: 0 };
+  const limit = await rateLimit(env.DB, ipBucket(request, 'stats'), 10, 3600);
+  if (!limit.ok) return json({ ok: true });
 
-    if (type === 'install') {
-      if (platform === 'android') stats.android = (stats.android || 0) + 1;
-      else if (platform === 'ios') stats.ios = (stats.ios || 0) + 1;
-    } else if (type === 'web') {
-      stats.web = (stats.web || 0) + 1;
-    }
+  const body = await readJson(request);
+  if (!body) return json({ error: 'bad_request' }, 400);
 
-    await kv.put("stats_installs", JSON.stringify(stats));
-    return new Response(JSON.stringify({ ok: true, stats }), {
-      headers: { "Content-Type": "application/json" }
-    });
-  } catch (e) {
-    return new Response(JSON.stringify({ error: "Erreur enregistrement" }), { status: 400 });
-  }
+  const key = body.type === 'install' ? body.platform : 'web';
+  if (!KEYS.includes(key)) return json({ error: 'bad_request' }, 400);
+
+  await env.DB
+    .prepare(
+      `INSERT INTO stats (key, value) VALUES (?1, 1)
+       ON CONFLICT(key) DO UPDATE SET value = stats.value + 1`
+    )
+    .bind(key)
+    .run();
+
+  return json({ ok: true });
 }
