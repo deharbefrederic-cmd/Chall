@@ -120,9 +120,13 @@ class ApiError extends Error {
 }
 
 async function api(path, options = {}) {
+  const standalone =
+    window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
   const headers = {
     'X-Chall-Key': getAccessKey(),
     'X-Chall-Client': getClientId(),
+    'X-Chall-Mode': standalone ? 'app' : 'web',
     ...(options.body ? { 'Content-Type': 'application/json' } : {})
   };
 
@@ -693,18 +697,19 @@ async function checkAdminCommand(value) {
 
   try {
     const data = await api('/api/stats');
-    const android = data.android || 0;
-    const ios = data.ios || 0;
-    const web = data.web || 0;
+    const a = data.appareils || {};
+    const plateformes = (data.plateformes || [])
+      .map((p) => `   ${p.nom} : ${p.n}`)
+      .join('\n') || '   aucune donnée';
 
     await showDialog({
       title: '📊 Statistiques Challivretou',
       message:
-        `🤖 Android installé : ${android}\n` +
-        `🍏 iOS installé : ${ios}\n` +
-        `📱 Sous-total installé : ${android + ios}\n\n` +
-        `🌐 Navigateur : ${web}\n\n` +
-        `👥 Total : ${android + ios + web}`,
+        `👥 Utilisateurs actifs (7 j) : ${a.actifs7 || 0}\n` +
+        `📅 Actifs sur 30 j : ${a.actifs30 || 0}\n` +
+        `🆕 Nouveaux cette semaine : ${a.nouveaux7 || 0}\n\n` +
+        `📱 Appareils connus depuis le début : ${a.total || 0}\n\n` +
+        `Répartition (30 j) :\n${plateformes}`,
       showCancel: false,
       okText: 'Fermer'
     });
