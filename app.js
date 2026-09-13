@@ -180,6 +180,18 @@ gateInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') gateSubmit.click();
 });
 
+// Empêche la page de défiler derrière une fenêtre ouverte. Un compteur gère
+// les fenêtres empilées : le fond n'est libéré qu'à la fermeture de la dernière.
+let fenetresOuvertes = 0;
+function verrouillerFond() {
+  fenetresOuvertes++;
+  document.body.style.overflow = 'hidden';
+}
+function libererFond() {
+  fenetresOuvertes = Math.max(0, fenetresOuvertes - 1);
+  if (!fenetresOuvertes) document.body.style.overflow = '';
+}
+
 /* ------------------------------- dialogues ------------------------------ */
 
 function showDialog({ title, message, showCancel = true, okText = 'OK', cancelText = 'Annuler' }) {
@@ -193,9 +205,21 @@ function showDialog({ title, message, showCancel = true, okText = 'OK', cancelTe
     okBtn.textContent = okText;
     cancelBtn.textContent = cancelText;
     cancelBtn.style.display = showCancel ? 'block' : 'none';
+
+    // Un journal de vingt lignes dépasse l'écran : il doit défiler dans la
+    // fenêtre, et non entraîner la page derrière.
+    const zone = $('dialogMessage');
+    zone.style.maxHeight = '55vh';
+    zone.style.overflowY = 'auto';
+    zone.style.touchAction = 'pan-y';
+    zone.style.overscrollBehavior = 'contain';
+    zone.scrollTop = 0;
+
     modal.style.display = 'flex';
+    verrouillerFond();
 
     const cleanup = () => {
+      libererFond();
       modal.style.display = 'none';
       okBtn.removeEventListener('click', onOk);
       cancelBtn.removeEventListener('click', onCancel);
@@ -689,8 +713,10 @@ function showGroupDialog(item, candidats, nouveauCode) {
 
     modal.appendChild(box);
     document.body.appendChild(modal);
+    verrouillerFond();
 
     const fermer = (valeur) => {
+      libererFond();
       modal.remove();
       resolve(valeur);
     };
@@ -923,6 +949,7 @@ function panneau(titre, corps, boutons) {
       const bouton = el('button', b.classe || 'btn-save', b.texte);
       bouton.type = 'button';
       bouton.addEventListener('click', () => {
+        libererFond();
         modal.remove();
         resolve(b.valeur);
       });
@@ -931,6 +958,7 @@ function panneau(titre, corps, boutons) {
     box.appendChild(barre);
     modal.appendChild(box);
     document.body.appendChild(modal);
+    verrouillerFond();
   });
 }
 
@@ -960,7 +988,7 @@ async function demanderCleAdmin() {
     const valider = el('button', 'btn-save', 'Valider');
     valider.type = 'button';
 
-    annuler.addEventListener('click', () => { modal.remove(); resolve(false); });
+    annuler.addEventListener('click', () => { libererFond(); modal.remove(); resolve(false); });
 
     valider.addEventListener('click', async () => {
       const saisie = champ.value.trim();
@@ -983,6 +1011,7 @@ async function demanderCleAdmin() {
     box.appendChild(barre);
     modal.appendChild(box);
     document.body.appendChild(modal);
+    verrouillerFond();
     champ.focus();
   });
 }
@@ -1037,17 +1066,38 @@ async function montrerStats() {
 async function montrerJournal() {
   try {
     const data = await api('/api/historique');
-    const lignes = (data.entrees || []).map((e) => {
+    const entrees = data.entrees || [];
+
+    // Une ligne d'historique contient l'état AVANT le changement. L'état APRÈS
+    // est donc l'état archivé par la modification suivante de la même fiche,
+    // ou l'état actuel s'il n'y en a pas eu. Sans ce chaînage, on compare à
+    // l'état d'aujourd'hui et toute modification revenue en arrière paraît
+    // n'avoir rien changé.
+    const suivant = new Map();
+    const lignes = [];
+
+    for (const e of entrees) {
+      const apres = suivant.get(e.id) || { adresse: e.adresse, code: e.code };
+      suivant.set(e.id, { adresse: e.ancienneAdresse, code: e.ancienCode });
+
       const quand = new Date(e.quand).toLocaleString('fr-FR', {
         day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
       });
-      if (e.action === 'delete') return `${quand}  ${e.adresse}\n   supprimée (code ${e.ancienCode})`;
-      if (e.ancienCode === e.code) return `${quand}  ${e.adresse}\n   adresse modifiée`;
-      return `${quand}  ${e.adresse}\n   ${e.ancienCode} → ${e.code}`;
-    });
+      const nom = e.ancienneAdresse;
+
+      if (e.action === 'delete') {
+        lignes.push(`${quand}  ${nom}\n   supprimée (code ${e.ancienCode})`);
+      } else if (e.ancienCode !== apres.code) {
+        lignes.push(`${quand}  ${nom}\n   ${e.ancienCode} → ${apres.code}`);
+      } else if (e.ancienneAdresse !== apres.adresse) {
+        lignes.push(`${quand}  ${nom}\n   renommée en ${apres.adresse}`);
+      }
+      // Les modifications sans effet réel ne sont pas affichées.
+    }
+
     await showDialog({
       title: '🕘 Dernières modifications',
-      message: lignes.length ? lignes.join('\n\n') : 'Aucune modification enregistrée.',
+      message: lignes.length ? lignes.join('\n\n') : 'Aucune modification à signaler.',
       showCancel: false,
       okText: 'Fermer'
     });
@@ -1146,7 +1196,7 @@ async function partagerLien() {
   if (!logo) return;
   let minuteur = null;
   const armer = () => {
-    minuteur = setTimeout(() => { minuteur = null; ouvrirAdmin(); }, 900);
+    minuteur = setTimeout(() => { minuteur = null; ouvrirAdmin(); }, 3000);
   };
   const desarmer = () => { clearTimeout(minuteur); };
   logo.addEventListener('pointerdown', armer);
