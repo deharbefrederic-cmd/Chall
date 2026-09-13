@@ -112,10 +112,10 @@ export function ipBucket(request, prefix) {
 export async function archive(db, row, action, actor) {
   await db
     .prepare(
-      `INSERT INTO codes_history (id, address, code, hs, action, actor, archived_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`
+      `INSERT INTO codes_history (id, address, code, hs, action, actor, archived_at, prev_updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`
     )
-    .bind(row.id, row.address, row.code, row.hs, action, actor, Date.now())
+    .bind(row.id, row.address, row.code, row.hs, action, actor, Date.now(), row.updated_at)
     .run();
 }
 
@@ -314,4 +314,27 @@ export async function noterCleInvalide(db) {
   } catch {
     // Le comptage ne doit jamais empêcher le refus lui-même.
   }
+}
+
+const encodeurAdmin = new TextEncoder();
+
+/** Comparaison à temps constant, pour ne pas fuiter la clé octet par octet. */
+function egaliteConstante(a, b) {
+  const ab = encodeurAdmin.encode(a);
+  const bb = encodeurAdmin.encode(b);
+  if (ab.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
+  return diff === 0;
+}
+
+/**
+ * Vérifie la clé d'administration, distincte de la clé d'accès partagée.
+ * Sans elle, le serveur refuse : masquer une commande dans le navigateur
+ * ne protégerait rien, puisque tous les livreurs ont le même code.
+ */
+export function estAdmin(request, env) {
+  const attendue = env.CHALL_ADMIN_KEY;
+  if (!attendue) return false;
+  return egaliteConstante(request.headers.get('X-Chall-Admin') || '', attendue);
 }
