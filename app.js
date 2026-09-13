@@ -494,11 +494,16 @@ async function commit(op, optimistic) {
     if (result && result.record) {
       const idx = records.findIndex((r) => r.id === result.record.id);
       if (idx !== -1) records[idx] = result.record;
+      // Fiches mises à jour en même temps (résidence à plusieurs entrées).
+      for (const compagne of result.aussi || []) {
+        const k = records.findIndex((r) => r.id === compagne.id);
+        if (k !== -1) records[k] = compagne;
+      }
       saveCache();
       renderList();
     }
     updateStatus();
-    return { ok: true };
+    return { ok: true, data: result };
   } catch (err) {
     if (err.status === 401) {
       openGate('Clé refusée. Saisissez la clé à jour.');
@@ -620,6 +625,79 @@ modalAddress.addEventListener('input', () => {
 // La liste se ferme quand on passe au champ Code, pas sur la perte de focus :
 // un simple défilement faisait perdre le focus et fermait la liste.
 modalCode.addEventListener('focus', hideSuggestions);
+
+/* ------------------- résidences à plusieurs entrées ------------------- */
+
+/**
+ * Fiches susceptibles d'appartenir au même immeuble : celles déjà groupées
+ * avec elle, plus celles qui portent encore l'ancien code.
+ * Le nom de rue n'entre pas en compte : une résidence peut avoir deux entrées
+ * sur deux voies différentes.
+ */
+function candidatsGroupe(item, ancienCode) {
+  return records.filter(
+    (r) =>
+      r.id !== item.id &&
+      ((item.groupe && r.groupe && r.groupe === item.groupe) || r.code === ancienCode)
+  );
+}
+
+/** Renvoie les identifiants cochés, ou null si l'utilisateur annule. */
+function showGroupDialog(item, candidats, nouveauCode) {
+  return new Promise((resolve) => {
+    const modal = el('div', 'modal');
+    modal.style.display = 'flex';
+    const box = el('div', 'modal-content');
+
+    box.appendChild(el('h3', null, 'Même résidence ?'));
+
+    const intro = el('p', null,
+      candidats.length + (candidats.length > 1 ? ' autres adresses portent' : ' autre adresse porte') +
+      ' le code ' + item.code + '. Cochez celles qui doivent passer à ' + nouveauCode + '.');
+    intro.style.cssText = 'font-size:14px;color:#cbd5e1;line-height:1.5;margin-bottom:14px;';
+    box.appendChild(intro);
+
+    const liste = el('div');
+    liste.style.cssText = 'max-height:240px;overflow-y:auto;touch-action:pan-y;overscroll-behavior:contain;margin-bottom:16px;';
+
+    const cases = candidats.map((c) => {
+      const ligne = el('label');
+      ligne.style.cssText =
+        'display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid #1e293b;font-size:14px;color:#e2e8f0;';
+      const coche = document.createElement('input');
+      coche.type = 'checkbox';
+      // Un groupe déjà confirmé est coché d'office : l'appli se souvient.
+      coche.checked = Boolean(item.groupe && c.groupe === item.groupe);
+      coche.style.cssText = 'width:20px;height:20px;flex:none;';
+      ligne.append(coche, el('span', null, c.address));
+      liste.appendChild(ligne);
+      return { coche, id: c.id };
+    });
+
+    box.appendChild(liste);
+
+    const barre = el('div', 'modal-btns');
+    barre.style.cssText = 'justify-content:flex-end;gap:10px;';
+    const seule = el('button', 'btn-cancel', 'Celle-ci seule');
+    seule.type = 'button';
+    const valider = el('button', 'btn-save', 'Valider');
+    valider.type = 'button';
+    barre.append(seule, valider);
+    box.appendChild(barre);
+
+    modal.appendChild(box);
+    document.body.appendChild(modal);
+
+    const fermer = (valeur) => {
+      modal.remove();
+      resolve(valeur);
+    };
+    seule.addEventListener('click', () => fermer([]));
+    valider.addEventListener('click', () =>
+      fermer(cases.filter((c) => c.coche.checked).map((c) => c.id))
+    );
+  });
+}
 
 /* ------------------------------- actions -------------------------------- */
 
@@ -765,6 +843,8 @@ saveBtn.addEventListener('click', async () => {
           showCancel: false,
           okText: 'Compris'
         });
+      } else if (res.data && res.data.corrige) {
+        showToast('Adresse corrigée : ' + res.data.corrige);
       } else {
         showToast('Adresse ajoutée');
       }
@@ -779,19 +859,43 @@ saveBtn.addEventListener('click', async () => {
       return;
     }
 
+    const codeChanged = item.code !== code;
+    const ancienCode = item.code;
+
+    let aussi = [];
+    if (codeChanged) {
+      const candidats = candidatsGroupe(item, ancienCode);
+      if (candidats.length) {
+        editModal.style.display = 'none';
+        const choix = await showGroupDialog(item, candidats, code);
+        if (choix === null) return;
+        aussi = choix;
+      }
+    }
+
     editModal.style.display = 'none';
     const res = await commit(
-      { kind: 'patch', id: item.id, patch: { address, code } },
+      { kind: 'patch', id: item.id, patch: { address, code, aussi } },
       () => {
-        const codeChanged = item.code !== code;
         item.address = address;
         item.code = code;
         if (codeChanged) item.hs = false;
         item.updatedAt = Date.now();
+        // Application immédiate aux fiches cochées, avant la réponse serveur.
+        for (const autreId of aussi) {
+          const autre = records.find((r) => r.id === autreId);
+          if (autre) {
+            autre.code = code;
+            autre.hs = false;
+            autre.updatedAt = Date.now();
+          }
+        }
       }
     );
 
-    showToast(res.ok ? 'Fiche mise à jour' : res.err.message);
+    if (!res.ok) showToast(res.err.message);
+    else if (aussi.length) showToast((aussi.length + 1) + ' fiches mises à jour');
+    else showToast('Fiche mise à jour');
   } finally {
     saveBtn.disabled = false;
     isBusy = false;
@@ -843,18 +947,36 @@ async function checkAdminCommand(value) {
   try {
     const data = await api('/api/stats');
     const a = data.appareils || {};
-    const plateformes = (data.plateformes || [])
-      .map((p) => `   ${p.nom} : ${p.n}`)
-      .join('\n') || '   aucune donnée';
+
+    const plateformes =
+      (data.plateformes || []).map((p) => `   ${p.nom} : ${p.n}`).join('\n') || '   aucune donnée';
+
+    const jours = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+    const nomJour = (iso) => {
+      const d = new Date(iso + 'T12:00:00');
+      const ecart = Math.round((Date.now() - d.getTime()) / 86400000);
+      if (ecart <= 0) return "Aujourd'hui";
+      if (ecart === 1) return 'Hier';
+      return jours[d.getDay()];
+    };
+
+    const journal =
+      (data.journal || [])
+        .map((j) => `   ${nomJour(j.jour)} : ${j.appareils} appareil(s) · ${j.ouvertures} ouverture(s)`)
+        .join('\n') || '   aucune donnée';
+
+    const totalRefus = (data.refus || []).reduce((n, r) => n + r.n, 0);
 
     await showDialog({
       title: '📊 Statistiques Challivretou',
       message:
         `👥 Utilisateurs actifs (7 j) : ${a.actifs7 || 0}\n` +
         `📅 Actifs sur 30 j : ${a.actifs30 || 0}\n` +
-        `🆕 Nouveaux cette semaine : ${a.nouveaux7 || 0}\n\n` +
-        `📱 Appareils connus depuis le début : ${a.total || 0}\n\n` +
-        `Répartition (30 j) :\n${plateformes}`,
+        `🆕 Nouveaux cette semaine : ${a.nouveaux7 || 0}\n` +
+        `📱 Appareils connus : ${a.total || 0}\n\n` +
+        `📆 Connexions par jour :\n${journal}\n\n` +
+        `📲 Répartition (30 j) :\n${plateformes}\n\n` +
+        `🔑 Tentatives avec clé invalide (7 j) : ${totalRefus}`,
       showCancel: false,
       okText: 'Fermer'
     });
