@@ -153,6 +153,14 @@ const TYPES_VOIE =
  * Prudent par construction : un mot contenant déjà une majuscule n'est jamais
  * retouché, pour ne pas transformer « Code WC » en « Code Wc ».
  */
+/**
+ * Jargon de l'équipe : raccourcis maison développés en adresse complète.
+ * Les valeurs sont en minuscules, la mise en majuscules se fait ensuite.
+ */
+const JARGON = {
+  gbt: 'boulevard gambetta'
+};
+
 // Abréviations de voie développées à l'enregistrement, pour un registre homogène.
 const EXPANSIONS = {
   av: 'Avenue', ave: 'Avenue', aven: 'Avenue',
@@ -172,6 +180,9 @@ const EXPANSIONS = {
 
 /** Développe une abréviation isolée. Traite aussi les parties d'un mot composé. */
 function developper(mot) {
+  const entier = mot.replace(/\.$/, '').toLowerCase();
+  if (JARGON[entier]) return JARGON[entier];
+
   return mot
     .split('-')
     .map((part) => {

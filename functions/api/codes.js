@@ -96,6 +96,18 @@ export async function onRequestPost(context) {
     return json({ error: 'write_failed', message: "L'enregistrement a échoué." }, 500);
   }
 
+  // Trace de création : sans elle, le journal montre des suppressions
+  // de fiches qui semblent n'avoir jamais existé.
+  context.waitUntil(
+    db
+      .prepare(
+        `INSERT INTO codes_history (id, address, code, hs, action, actor, archived_at, prev_updated_at)
+         VALUES (?1, ?2, ?3, 0, 'create', ?4, ?5, NULL)`
+      )
+      .bind(id, adresseFinale, code, author, now)
+      .run()
+  );
+
   const created = await db
     .prepare(`SELECT id, address, code, hs, created_at, updated_at, author FROM codes WHERE id = ?1`)
     .bind(id)
