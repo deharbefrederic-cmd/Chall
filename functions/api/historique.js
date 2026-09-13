@@ -8,7 +8,7 @@ export async function onRequestGet(context) {
 
   const { results } = await context.env.DB
     .prepare(
-      `SELECT h.archived_at, h.action,
+      `SELECT h.id, h.archived_at, h.action,
               h.address AS ancienne_adresse, h.code AS ancien_code,
               c.address AS adresse, c.code AS code
        FROM codes_history h
@@ -20,11 +20,15 @@ export async function onRequestGet(context) {
 
   return json({
     entrees: (results || []).map((r) => ({
+      id: r.id,
       quand: r.archived_at,
       action: r.action,
-      adresse: r.adresse || r.ancienne_adresse,
+      // État archivé, c'est-à-dire celui d'avant ce changement.
+      ancienneAdresse: r.ancienne_adresse,
       ancienCode: r.ancien_code,
-      code: r.action === 'delete' ? null : r.code
+      // État actuel de la fiche, si elle existe encore.
+      adresse: r.adresse,
+      code: r.code
     }))
   });
 }
