@@ -1,4 +1,4 @@
-import { json } from './_lib.js';
+import { json, noterCleInvalide } from './_lib.js';
 
 const encoder = new TextEncoder();
 
@@ -26,6 +26,10 @@ export async function onRequest(context) {
 
   const provided = request.headers.get('X-Chall-Key') || '';
   if (!safeEqual(provided, expected)) {
+    // Une clé fournie mais fausse signale un vrai porteur de lien (périmé, mal
+    // recopié, ou qui a circulé). Une requête sans aucune clé est un robot :
+    // on ne la compte pas, pour ne pas transformer le compteur en bruit.
+    if (provided) context.waitUntil(noterCleInvalide(env.DB));
     return json({ error: 'unauthorized', message: "Clé d'accès invalide." }, 401);
   }
 

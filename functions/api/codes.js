@@ -1,6 +1,6 @@
 import {
   json, sanitizeText, normAddress, isValidId, clientId, toRecord, readJson,
-  rateLimit, ipBucket, devicePlatform, touchDevice, formatAddress, MAX_ADDRESS, MAX_CODE
+  rateLimit, ipBucket, devicePlatform, touchDevice, formatAddress, corrigerViaBAN, noterVisite, MAX_ADDRESS, MAX_CODE
 } from './_lib.js';
 
 export async function onRequestGet(context) {
@@ -15,8 +15,9 @@ export async function onRequestGet(context) {
     )
     .all();
 
-  // Présence de l'appareil : c'est ce qui permet de compter les utilisateurs actifs.
+  // Présence de l'appareil : utilisateurs actifs et journal quotidien.
   await touchDevice(db, me, devicePlatform(context.request));
+  context.waitUntil(noterVisite(db, me));
 
   return json({ records: (results || []).map((row) => toRecord(row, me)) });
 }
@@ -52,7 +53,11 @@ export async function onRequestPost(context) {
   // d'attente hors ligne reste alors sans effet de bord.
   const id = isValidId(body.id) ? body.id : crypto.randomUUID();
   const author = clientId(request);
-  const norm = normAddress(address);
+
+  // Orthographe : correction uniquement si elle est sûre (voir corrigerViaBAN).
+  const officielle = await corrigerViaBAN(address);
+  const adresseFinale = officielle || address;
+  const norm = normAddress(adresseFinale);
   const now = Date.now();
 
   const existing = await db
@@ -75,7 +80,7 @@ export async function onRequestPost(context) {
          VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5, ?6)
          ON CONFLICT(id) DO NOTHING`
       )
-      .bind(id, address, norm, code, now, author)
+      .bind(id, adresseFinale, norm, code, now, author)
       .run();
   } catch (err) {
     const again = await db
@@ -96,5 +101,5 @@ export async function onRequestPost(context) {
     .bind(id)
     .first();
 
-  return json({ record: toRecord(created, author) }, 201);
+  return json({ record: toRecord(created, author), corrige: officielle || null }, 201);
 }
