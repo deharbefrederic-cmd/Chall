@@ -1,6 +1,6 @@
 import {
   json, sanitizeText, normAddress, isValidId, clientId, toRecord, readJson,
-  rateLimit, ipBucket, archive, MAX_ADDRESS, MAX_CODE, DELETE_WINDOW_MS
+  rateLimit, ipBucket, archive, formatAddress, MAX_ADDRESS, MAX_CODE, DELETE_WINDOW_MS
 } from '../_lib.js';
 
 async function guard(context) {
@@ -50,7 +50,7 @@ export async function onRequestPatch(context) {
     if (!next || next.length < 3) {
       return json({ error: 'invalid_address', message: 'Adresse manquante ou trop courte.' }, 400);
     }
-    address = next;
+    address = formatAddress(next);
   }
 
   if (body.code !== undefined) {
