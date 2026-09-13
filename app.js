@@ -256,6 +256,8 @@ const STOPWORDS = new Set([
 
 // Abréviations de voies : « bd » et « boulevard » doivent trouver la même chose.
 const ABBREVIATIONS = {
+  // Jargon de l'équipe : une entrée peut valoir plusieurs mots.
+  gbt: 'boulevard gambetta',
   av: 'avenue', ave: 'avenue', aven: 'avenue',
   bd: 'boulevard', bld: 'boulevard', blvd: 'boulevard', boul: 'boulevard',
   r: 'rue',
@@ -756,6 +758,7 @@ function openEdit(id) {
   modalCode.value = item.code;
 
   const canDelete = item.isMine && item.createdAt && Date.now() - item.createdAt < DELETE_WINDOW_MS;
+  deleteBtn.textContent = '🗑️ Supprimer';
   deleteBtn.style.display = canDelete ? 'block' : 'none';
 
   hsToggleBtn.style.display = 'block';
@@ -1085,7 +1088,9 @@ async function montrerJournal() {
       });
       const nom = e.ancienneAdresse;
 
-      if (e.action === 'delete') {
+      if (e.action === 'create') {
+        lignes.push(`${quand}  ${nom}\n   créée (code ${e.ancienCode})`);
+      } else if (e.action === 'delete') {
         lignes.push(`${quand}  ${nom}\n   supprimée (code ${e.ancienCode})`);
       } else if (e.ancienCode !== apres.code) {
         lignes.push(`${quand}  ${nom}\n   ${e.ancienCode} → ${apres.code}`);
