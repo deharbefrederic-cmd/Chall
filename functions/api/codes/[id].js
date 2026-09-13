@@ -90,9 +90,40 @@ export async function onRequestPatch(context) {
   }
 
   const now = Date.now();
+
+  // Retour en arrière : si la valeur enregistrée est exactement celle d'avant
+  // la dernière modification, et que celle-ci est récente, c'est une annulation.
+  // On restaure alors l'état antérieur plutôt que de marquer la fiche comme
+  // modifiée — un code corrigé puis remis ne doit pas afficher le badge MAJ.
+  let annulation = null;
+  if (codeChanged || addressChanged) {
+    const precedent = await db
+      .prepare(
+        `SELECT address, code, hs, prev_updated_at, archived_at
+         FROM codes_history WHERE id = ?1 AND action = 'update' ORDER BY seq DESC LIMIT 1`
+      )
+      .bind(id)
+      .first();
+
+    if (
+      precedent &&
+      precedent.address === address &&
+      precedent.code === code &&
+      now - precedent.archived_at < DELETE_WINDOW_MS
+    ) {
+      annulation = precedent;
+    }
+  }
+
+  if (annulation) hs = annulation.hs;
+
   // Un signalement HS seul ne rajeunit pas la fiche : le badge « MAJ »
   // doit rester réservé aux changements de code ou d'adresse.
-  const updatedAt = codeChanged || addressChanged ? now : row.updated_at;
+  const updatedAt = annulation
+    ? annulation.prev_updated_at || 0
+    : codeChanged || addressChanged
+      ? now
+      : row.updated_at;
 
   // Fiches à mettre à jour en même temps (résidence à plusieurs entrées).
   let compagnes = [];
@@ -122,10 +153,10 @@ export async function onRequestPatch(context) {
   const lot = [
     db
       .prepare(
-        `INSERT INTO codes_history (id, address, code, hs, action, actor, archived_at)
-         VALUES (?1, ?2, ?3, ?4, 'update', ?5, ?6)`
+        `INSERT INTO codes_history (id, address, code, hs, action, actor, archived_at, prev_updated_at)
+         VALUES (?1, ?2, ?3, ?4, 'update', ?5, ?6, ?7)`
       )
-      .bind(row.id, row.address, row.code, row.hs, me, now),
+      .bind(row.id, row.address, row.code, row.hs, me, now, row.updated_at),
     db
       .prepare(
         `UPDATE codes SET address = ?1, norm_address = ?2, code = ?3, hs = ?4, updated_at = ?5, groupe_id = ?6 WHERE id = ?7`
@@ -137,10 +168,10 @@ export async function onRequestPatch(context) {
     lot.push(
       db
         .prepare(
-          `INSERT INTO codes_history (id, address, code, hs, action, actor, archived_at)
-           VALUES (?1, ?2, ?3, ?4, 'update', ?5, ?6)`
+          `INSERT INTO codes_history (id, address, code, hs, action, actor, archived_at, prev_updated_at)
+           VALUES (?1, ?2, ?3, ?4, 'update', ?5, ?6, ?7)`
         )
-        .bind(c.id, c.address, c.code, c.hs, me, now)
+        .bind(c.id, c.address, c.code, c.hs, me, now, c.updated_at)
     );
     lot.push(
       db
