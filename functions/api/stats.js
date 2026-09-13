@@ -7,8 +7,9 @@ export async function onRequestGet(context) {
   const now = Date.now();
   const j7 = now - 7 * 24 * 60 * 60 * 1000;
   const j30 = now - 30 * 24 * 60 * 60 * 1000;
+  const depuis = new Date(j7).toISOString().slice(0, 10);
 
-  const [installs, devices, parPlateforme] = await Promise.all([
+  const [installs, devices, parPlateforme, journal, refus] = await Promise.all([
     db.prepare(`SELECT key, value FROM stats WHERE key IN ('android','ios','web')`).all(),
     db
       .prepare(
@@ -26,6 +27,17 @@ export async function onRequestGet(context) {
         `SELECT platform, COUNT(*) AS n FROM devices WHERE last_seen >= ?1 GROUP BY platform ORDER BY n DESC`
       )
       .bind(j30)
+      .all(),
+    db
+      .prepare(
+        `SELECT jour, COUNT(*) AS appareils, SUM(ouvertures) AS ouvertures
+         FROM visites WHERE jour >= ?1 GROUP BY jour ORDER BY jour DESC`
+      )
+      .bind(depuis)
+      .all(),
+    db
+      .prepare(`SELECT jour, cle_invalide FROM acces_refuses WHERE jour >= ?1 ORDER BY jour DESC`)
+      .bind(depuis)
       .all()
   ]);
 
@@ -40,7 +52,13 @@ export async function onRequestGet(context) {
       actifs30: devices?.actifs30 || 0,
       nouveaux7: devices?.nouveaux7 || 0
     },
-    plateformes: (parPlateforme.results || []).map((r) => ({ nom: r.platform, n: r.n }))
+    plateformes: (parPlateforme.results || []).map((r) => ({ nom: r.platform, n: r.n })),
+    journal: (journal.results || []).map((r) => ({
+      jour: r.jour,
+      appareils: r.appareils,
+      ouvertures: r.ouvertures
+    })),
+    refus: (refus.results || []).map((r) => ({ jour: r.jour, n: r.cle_invalide }))
   });
 }
 
