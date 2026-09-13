@@ -1,8 +1,12 @@
-import { json, readJson, rateLimit, ipBucket } from './_lib.js';
+import { json, readJson, rateLimit, ipBucket, estAdmin } from './_lib.js';
 
 const KEYS = ['android', 'ios', 'web'];
 
 export async function onRequestGet(context) {
+  if (!estAdmin(context.request, context.env)) {
+    return json({ error: 'forbidden', message: "Réservé à l'administrateur." }, 403);
+  }
+
   const db = context.env.DB;
   const now = Date.now();
   const j7 = now - 7 * 24 * 60 * 60 * 1000;
