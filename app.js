@@ -9,6 +9,7 @@
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
 const ACCESS_KEY = 'chall_access_key';
+const ADMIN_KEY = 'chall_admin_key';
 const CLIENT_KEY = 'chall_client_id';
 const RECENT_MS = 7 * 24 * 60 * 60 * 1000;
 const DELETE_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -127,6 +128,7 @@ async function api(path, options = {}) {
     'X-Chall-Key': getAccessKey(),
     'X-Chall-Client': getClientId(),
     'X-Chall-Mode': standalone ? 'app' : 'web',
+    ...(localStorage.getItem(ADMIN_KEY) ? { 'X-Chall-Admin': localStorage.getItem(ADMIN_KEY) } : {}),
     ...(options.body ? { 'Content-Type': 'application/json' } : {})
   };
 
@@ -904,50 +906,91 @@ saveBtn.addEventListener('click', async () => {
 
 /* ------------------------------ recherche ------------------------------- */
 
-async function checkAdminCommand(value) {
-  const command = value.trim().toLowerCase();
+/* --------------------- panneau d'administration --------------------- */
 
-  // Repartager l'accès à un collègue sans jamais retaper la clé.
-  if (command === '#lien') {
-    searchInput.value = '';
-    renderList();
+/** Fenêtre générique à boutons, construite sans HTML injecté. */
+function panneau(titre, corps, boutons) {
+  return new Promise((resolve) => {
+    const modal = el('div', 'modal');
+    modal.style.display = 'flex';
+    const box = el('div', 'modal-content');
+    box.appendChild(el('h3', null, titre));
+    if (corps) box.appendChild(corps);
 
-    const link = buildInviteLink();
-    let copied = false;
-    try {
-      await navigator.clipboard.writeText(link);
-      copied = true;
-    } catch {
-      /* presse-papiers refusé : le lien reste affiché */
-    }
-
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: 'Challivretou', text: "Lien d'accès Challivretou", url: link });
-        return;
-      } catch {
-        /* partage annulé */
-      }
-    }
-
-    await showDialog({
-      title: copied ? "Lien d'accès copié" : "Lien d'accès",
-      message: link + '\n\nEnvoyez-le au collègue. Un simple clic suffit, rien à saisir.',
-      showCancel: false,
-      okText: 'Fermer'
+    const barre = el('div', 'modal-btns');
+    barre.style.cssText = 'justify-content:flex-end;gap:10px;flex-wrap:wrap;';
+    boutons.forEach((b) => {
+      const bouton = el('button', b.classe || 'btn-save', b.texte);
+      bouton.type = 'button';
+      bouton.addEventListener('click', () => {
+        modal.remove();
+        resolve(b.valeur);
+      });
+      barre.appendChild(bouton);
     });
-    return;
-  }
+    box.appendChild(barre);
+    modal.appendChild(box);
+    document.body.appendChild(modal);
+  });
+}
 
-  if (command !== '#stats') return;
+/** Demande la clé d'administration et la valide auprès du serveur. */
+async function demanderCleAdmin() {
+  const corps = el('div');
+  const texte = el('p', null,
+    "Réservé à l'administrateur. Cette clé est différente de celle des livreurs.");
+  texte.style.cssText = 'font-size:14px;color:#94a3b8;line-height:1.4;margin-bottom:12px;';
+  const champ = document.createElement('input');
+  champ.type = 'password';
+  champ.autocomplete = 'off';
+  const erreur = el('p', 'gate-error');
+  corps.append(texte, champ, erreur);
 
-  searchInput.value = '';
-  renderList();
+  const modal = el('div', 'modal');
+  modal.style.display = 'flex';
+  const box = el('div', 'modal-content');
+  box.appendChild(el('h3', null, 'Accès administrateur'));
+  box.appendChild(corps);
 
+  return new Promise((resolve) => {
+    const barre = el('div', 'modal-btns');
+    barre.style.cssText = 'justify-content:flex-end;gap:10px;';
+    const annuler = el('button', 'btn-cancel', 'Annuler');
+    annuler.type = 'button';
+    const valider = el('button', 'btn-save', 'Valider');
+    valider.type = 'button';
+
+    annuler.addEventListener('click', () => { modal.remove(); resolve(false); });
+
+    valider.addEventListener('click', async () => {
+      const saisie = champ.value.trim();
+      if (!saisie) return;
+      valider.disabled = true;
+      erreur.textContent = '';
+      localStorage.setItem(ADMIN_KEY, saisie);
+      try {
+        await api('/api/stats');
+        modal.remove();
+        resolve(true);
+      } catch (err) {
+        localStorage.removeItem(ADMIN_KEY);
+        erreur.textContent = err.status === 403 ? 'Clé refusée.' : 'Serveur injoignable.';
+        valider.disabled = false;
+      }
+    });
+
+    barre.append(annuler, valider);
+    box.appendChild(barre);
+    modal.appendChild(box);
+    document.body.appendChild(modal);
+    champ.focus();
+  });
+}
+
+async function montrerStats() {
   try {
     const data = await api('/api/stats');
     const a = data.appareils || {};
-
     const plateformes =
       (data.plateformes || []).map((p) => `   ${p.nom} : ${p.n}`).join('\n') || '   aucune donnée';
 
@@ -963,12 +1006,12 @@ async function checkAdminCommand(value) {
     const journal =
       (data.journal || [])
         .map((j) => `   ${nomJour(j.jour)} : ${j.appareils} appareil(s) · ${j.ouvertures} ouverture(s)`)
-        .join('\n') || '   aucune donnée';
+        .join('\n') || '   aucune donnée pour le moment';
 
     const totalRefus = (data.refus || []).reduce((n, r) => n + r.n, 0);
 
     await showDialog({
-      title: '📊 Statistiques Challivretou',
+      title: '📊 Statistiques',
       message:
         `👥 Utilisateurs actifs (7 j) : ${a.actifs7 || 0}\n` +
         `📅 Actifs sur 30 j : ${a.actifs30 || 0}\n` +
@@ -980,14 +1023,143 @@ async function checkAdminCommand(value) {
       showCancel: false,
       okText: 'Fermer'
     });
-  } catch {
+  } catch (err) {
+    if (err.status === 403) localStorage.removeItem(ADMIN_KEY);
     await showDialog({
       title: 'Statistiques indisponibles',
-      message: 'Le serveur n’a pas répondu. Réessayez une fois en ligne.',
+      message: err.status === 403 ? "Clé d'administration refusée." : 'Le serveur n’a pas répondu.',
       showCancel: false,
       okText: 'Compris'
     });
   }
+}
+
+async function montrerJournal() {
+  try {
+    const data = await api('/api/historique');
+    const lignes = (data.entrees || []).map((e) => {
+      const quand = new Date(e.quand).toLocaleString('fr-FR', {
+        day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+      });
+      if (e.action === 'delete') return `${quand}  ${e.adresse}\n   supprimée (code ${e.ancienCode})`;
+      if (e.ancienCode === e.code) return `${quand}  ${e.adresse}\n   adresse modifiée`;
+      return `${quand}  ${e.adresse}\n   ${e.ancienCode} → ${e.code}`;
+    });
+    await showDialog({
+      title: '🕘 Dernières modifications',
+      message: lignes.length ? lignes.join('\n\n') : 'Aucune modification enregistrée.',
+      showCancel: false,
+      okText: 'Fermer'
+    });
+  } catch (err) {
+    if (err.status === 403) localStorage.removeItem(ADMIN_KEY);
+    await showDialog({
+      title: 'Journal indisponible',
+      message: err.status === 403 ? "Clé d'administration refusée." : 'Le serveur n’a pas répondu.',
+      showCancel: false,
+      okText: 'Compris'
+    });
+  }
+}
+
+function exporterCsv() {
+  const echappe = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const entetes = ['Adresse', 'Code', 'Hors service', 'Derniere modification'];
+  const lignes = records
+    .slice()
+    .sort((a, b) => a.address.localeCompare(b.address, 'fr', { numeric: true }))
+    .map((r) =>
+      [
+        r.address,
+        r.code,
+        r.hs ? 'oui' : 'non',
+        r.updatedAt ? new Date(r.updatedAt).toLocaleDateString('fr-FR') : ''
+      ].map(echappe).join(';')
+    );
+
+  // Point-virgule et BOM : ouverture directe dans un tableur français,
+  // accents conservés.
+  const contenu = '\uFEFF' + [entetes.map(echappe).join(';'), ...lignes].join('\r\n');
+  const blob = new Blob([contenu], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const lien = document.createElement('a');
+  lien.href = url;
+  lien.download = 'challivretou-' + new Date().toISOString().slice(0, 10) + '.csv';
+  document.body.appendChild(lien);
+  lien.click();
+  lien.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast(records.length + ' adresses exportées');
+}
+
+async function ouvrirAdmin() {
+  if (!localStorage.getItem(ADMIN_KEY)) {
+    const ok = await demanderCleAdmin();
+    if (!ok) return;
+  }
+
+  while (true) {
+    const choix = await panneau('🔧 Administration', null, [
+      { texte: '📊 Statistiques', valeur: 'stats' },
+      { texte: '🕘 Journal', valeur: 'journal' },
+      { texte: '💾 Exporter', valeur: 'export' },
+      { texte: '🔗 Lien d\'accès', valeur: 'lien' },
+      { texte: 'Fermer', valeur: null, classe: 'btn-cancel' }
+    ]);
+
+    if (choix === 'stats') await montrerStats();
+    else if (choix === 'journal') await montrerJournal();
+    else if (choix === 'export') { exporterCsv(); return; }
+    else if (choix === 'lien') await partagerLien();
+    else return;
+  }
+}
+
+async function partagerLien() {
+  const lien = buildInviteLink();
+  let copie = false;
+  try {
+    await navigator.clipboard.writeText(lien);
+    copie = true;
+  } catch {
+    /* presse-papiers refusé */
+  }
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'Challivretou', text: "Lien d'accès Challivretou", url: lien });
+      return;
+    } catch {
+      /* partage annulé */
+    }
+  }
+  await showDialog({
+    title: copie ? "Lien d'accès copié" : "Lien d'accès",
+    message: lien + '\n\nEnvoyez-le au collègue. Un simple clic suffit, rien à saisir.',
+    showCancel: false,
+    okText: 'Fermer'
+  });
+}
+
+// Ouverture du panneau : appui long sur le logo, ou saisie de #admin.
+(function brancherAdmin() {
+  const logo = document.querySelector('.brand-header img');
+  if (!logo) return;
+  let minuteur = null;
+  const armer = () => {
+    minuteur = setTimeout(() => { minuteur = null; ouvrirAdmin(); }, 900);
+  };
+  const desarmer = () => { clearTimeout(minuteur); };
+  logo.addEventListener('pointerdown', armer);
+  logo.addEventListener('pointerup', desarmer);
+  logo.addEventListener('pointerleave', desarmer);
+  logo.addEventListener('contextmenu', (e) => e.preventDefault());
+})();
+
+async function checkAdminCommand(value) {
+  if (value.trim().toLowerCase() !== '#admin') return;
+  searchInput.value = '';
+  renderList();
+  await ouvrirAdmin();
 }
 
 searchInput.addEventListener('input', (e) => {
