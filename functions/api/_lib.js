@@ -62,6 +62,7 @@ export function toRecord(row, me) {
     hs: row.hs === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    groupe: row.groupe_id || null,
     isMine: Boolean(me && row.author && row.author === me)
   };
 }
@@ -152,8 +153,39 @@ const TYPES_VOIE =
  * Prudent par construction : un mot contenant déjà une majuscule n'est jamais
  * retouché, pour ne pas transformer « Code WC » en « Code Wc ».
  */
+// Abréviations de voie développées à l'enregistrement, pour un registre homogène.
+const EXPANSIONS = {
+  av: 'Avenue', ave: 'Avenue', aven: 'Avenue',
+  bd: 'Boulevard', bld: 'Boulevard', blvd: 'Boulevard', boul: 'Boulevard',
+  r: 'Rue',
+  ch: 'Chemin', che: 'Chemin', chem: 'Chemin',
+  imp: 'Impasse',
+  rte: 'Route',
+  st: 'Saint', ste: 'Sainte',
+  pl: 'Place',
+  crn: 'Corniche',
+  trav: 'Traverse',
+  mtee: 'Montée',
+  psg: 'Passage',
+  sq: 'Square'
+};
+
+/** Développe une abréviation isolée. Traite aussi les parties d'un mot composé. */
+function developper(mot) {
+  return mot
+    .split('-')
+    .map((part) => {
+      const nu = part.replace(/\.$/, '').toLowerCase();
+      return EXPANSIONS[nu] || part;
+    })
+    .join('-');
+}
+
 export function formatAddress(str) {
   let out = str;
+
+  // 0. abréviations : « bd » -> « Boulevard », « st-jean » -> « Saint-Jean »
+  out = out.split(' ').map(developper).join(' ');
 
   // 1. espace manquant entre le numéro et le type de voie
   out = out.replace(new RegExp('\\b(\\d+)(' + TYPES_VOIE + ')\\b', 'gi'), '$1 $2');
@@ -162,15 +194,124 @@ export function formatAddress(str) {
   out = out.replace(/\s*\/\s*/g, '/').replace(/\s*-\s*/g, '-').replace(/\s+/g, ' ').trim();
 
   // 3. majuscules, en laissant intact tout mot qui en contient déjà une
-  const mots = out.split(' ');
-  out = mots
+  out = out
+    .split(' ')
     .map((mot, i) => {
-      if (/[A-ZÀ-Þ]/.test(mot)) return mot;
-      if (i > 0 && PARTICULES.has(mot)) return mot;
-      // capitalise aussi après un tiret : saint-jean -> Saint-Jean
-      return mot.replace(/(^|[-'])([a-zà-ÿ])/g, (m, sep, c) => sep + c.toUpperCase());
+      if (i > 0 && PARTICULES.has(mot.toLowerCase()) && !/[A-ZÀ-Þ]/.test(mot)) return mot;
+      // Chaque partie d'un mot composé est jugée séparément : dans
+      // « Saint-barthelemy », le « Saint » est déjà correct mais pas la suite.
+      return mot
+        .split('-')
+        .map((part) => {
+          if (/[A-ZÀ-Þ]/.test(part)) return part;
+          return part.replace(/(^|')([a-zà-ÿ])/g, (m, sep, c) => sep + c.toUpperCase());
+        })
+        .join('-');
     })
     .join(' ');
 
   return out;
+}
+
+/** Distance de Levenshtein, bornée : sert à mesurer un écart de frappe. */
+export function distance(a, b) {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > 3) return 99;
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = prev[j];
+      prev[j] = Math.min(
+        prev[j] + 1,
+        prev[j - 1] + 1,
+        diag + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+      diag = tmp;
+    }
+  }
+  return prev[b.length];
+}
+
+/**
+ * Corrige l'orthographe d'une adresse via la Base Adresse Nationale.
+ * Très prudent : ne corrige que si le numéro est identique et que l'écart
+ * avec la saisie est minime. Renvoie null si aucune correction sûre.
+ */
+export async function corrigerViaBAN(address) {
+  // Seules les vraies adresses sont vérifiées. « Code WC », « Parc St Exupéry »
+  // ne commencent pas par un numéro : on n'y touche jamais.
+  const numSaisi = (address.match(/^\s*(\d+)/) || [])[1];
+  if (!numSaisi) return null;
+
+  const url =
+    'https://data.geopf.fr/geocodage/search?index=address&limit=1&citycode=06088&q=' +
+    encodeURIComponent(address);
+
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(2500) });
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const props = (data.features && data.features[0] && data.features[0].properties) || null;
+    if (!props || props.type !== 'housenumber') return null;
+    if (typeof props.score === 'number' && props.score < 0.9) return null;
+
+    const officielle = props.name;
+    if (!officielle) return null;
+
+    // Le numéro doit être rigoureusement le même : jamais de glissement d'immeuble.
+    if ((officielle.match(/^\s*(\d+)/) || [])[1] !== numSaisi) return null;
+
+    const a = normAddress(address);
+    const b = normAddress(officielle);
+    if (a === b) return null; // identique aux accents près : rien à corriger
+
+    // Au-delà de deux caractères d'écart, ce n'est plus une faute de frappe.
+    if (distance(a, b) > 2) return null;
+
+    return officielle;
+  } catch {
+    return null; // service indisponible ou trop lent : on garde la saisie
+  }
+}
+
+const jourCourant = () => new Date().toISOString().slice(0, 10);
+
+/** Une ligne par appareil et par jour, compteur d'ouvertures. */
+export async function noterVisite(db, clientId) {
+  if (!clientId) return;
+  await db
+    .prepare(
+      `INSERT INTO visites (jour, client_id, ouvertures) VALUES (?1, ?2, 1)
+       ON CONFLICT(jour, client_id) DO UPDATE SET ouvertures = visites.ouvertures + 1`
+    )
+    .bind(jourCourant(), clientId)
+    .run();
+}
+
+/**
+ * Compte les refus avec clé fournie mais fausse. Plafonné à 500 écritures
+ * par jour : un robot qui martèle l'adresse ne peut pas épuiser le quota.
+ */
+export async function noterCleInvalide(db) {
+  const jour = jourCourant();
+  try {
+    const row = await db
+      .prepare('SELECT cle_invalide FROM acces_refuses WHERE jour = ?1')
+      .bind(jour)
+      .first();
+    if (row && row.cle_invalide >= 500) return;
+
+    await db
+      .prepare(
+        `INSERT INTO acces_refuses (jour, cle_invalide) VALUES (?1, 1)
+         ON CONFLICT(jour) DO UPDATE SET cle_invalide = acces_refuses.cle_invalide + 1`
+      )
+      .bind(jour)
+      .run();
+  } catch {
+    // Le comptage ne doit jamais empêcher le refus lui-même.
+  }
 }
