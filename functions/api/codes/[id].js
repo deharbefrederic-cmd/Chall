@@ -1,6 +1,6 @@
 import {
   json, sanitizeText, normAddress, isValidId, clientId, toRecord, readJson,
-  rateLimit, ipBucket, archive, formatAddress, MAX_ADDRESS, MAX_CODE, DELETE_WINDOW_MS
+  rateLimit, ipBucket, archive, formatAddress, corrigerViaBAN, MAX_ADDRESS, MAX_CODE, DELETE_WINDOW_MS
 } from '../_lib.js';
 
 async function guard(context) {
@@ -51,6 +51,8 @@ export async function onRequestPatch(context) {
       return json({ error: 'invalid_address', message: 'Adresse manquante ou trop courte.' }, 400);
     }
     address = formatAddress(next);
+    const officielle = await corrigerViaBAN(address);
+    if (officielle) address = officielle;
   }
 
   if (body.code !== undefined) {
@@ -87,25 +89,75 @@ export async function onRequestPatch(context) {
     }
   }
 
-  await archive(db, row, 'update', me);
-
   const now = Date.now();
   // Un signalement HS seul ne rajeunit pas la fiche : le badge « MAJ »
   // doit rester réservé aux changements de code ou d'adresse.
   const updatedAt = codeChanged || addressChanged ? now : row.updated_at;
 
-  await db
-    .prepare(
-      `UPDATE codes SET address = ?1, norm_address = ?2, code = ?3, hs = ?4, updated_at = ?5 WHERE id = ?6`
-    )
-    .bind(address, norm, code, hs, updatedAt, id)
-    .run();
+  // Fiches à mettre à jour en même temps (résidence à plusieurs entrées).
+  let compagnes = [];
+  if (codeChanged && Array.isArray(body.aussi) && body.aussi.length) {
+    const ids = body.aussi.filter((x) => isValidId(x) && x !== id).slice(0, 20);
+    if (ids.length) {
+      const marques = ids.map((_, i) => '?' + (i + 1)).join(',');
+      const res = await db
+        .prepare(
+          `SELECT id, address, code, hs, created_at, updated_at, author, groupe_id
+           FROM codes WHERE id IN (${marques})`
+        )
+        .bind(...ids)
+        .all();
+      compagnes = res.results || [];
+    }
+  }
+
+  // Un groupe existant est réutilisé plutôt que dupliqué.
+  let groupeId = row.groupe_id || null;
+  if (compagnes.length) {
+    groupeId = groupeId || compagnes.find((c) => c.groupe_id)?.groupe_id || crypto.randomUUID();
+  }
+
+  // Tout part en un seul lot : soit l'ensemble des fiches est à jour,
+  // soit aucune. Jamais d'état intermédiaire après une coupure réseau.
+  const lot = [
+    db
+      .prepare(
+        `INSERT INTO codes_history (id, address, code, hs, action, actor, archived_at)
+         VALUES (?1, ?2, ?3, ?4, 'update', ?5, ?6)`
+      )
+      .bind(row.id, row.address, row.code, row.hs, me, now),
+    db
+      .prepare(
+        `UPDATE codes SET address = ?1, norm_address = ?2, code = ?3, hs = ?4, updated_at = ?5, groupe_id = ?6 WHERE id = ?7`
+      )
+      .bind(address, norm, code, hs, updatedAt, groupeId, id)
+  ];
+
+  for (const c of compagnes) {
+    lot.push(
+      db
+        .prepare(
+          `INSERT INTO codes_history (id, address, code, hs, action, actor, archived_at)
+           VALUES (?1, ?2, ?3, ?4, 'update', ?5, ?6)`
+        )
+        .bind(c.id, c.address, c.code, c.hs, me, now)
+    );
+    lot.push(
+      db
+        .prepare(`UPDATE codes SET code = ?1, hs = 0, updated_at = ?2, groupe_id = ?3 WHERE id = ?4`)
+        .bind(code, now, groupeId, c.id)
+    );
+  }
+
+  await db.batch(lot);
+
+  const misAJour = compagnes.map((c) =>
+    toRecord({ ...c, code, hs: 0, updated_at: now, groupe_id: groupeId }, me)
+  );
 
   return json({
-    record: toRecord(
-      { ...row, address, code, hs, updated_at: updatedAt },
-      me
-    )
+    record: toRecord({ ...row, address, code, hs, updated_at: updatedAt, groupe_id: groupeId }, me),
+    aussi: misAJour
   });
 }
 
