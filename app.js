@@ -1087,7 +1087,10 @@ async function montrerStats() {
 
     const journal =
       (data.journal || [])
-        .map((j) => `   ${nomJour(j.jour)} : ${j.appareils} appareil(s) · ${j.ouvertures} ouverture(s)`)
+        .map((j) => {
+          const entete = `   ${nomJour(j.jour)} : ${j.appareils} appareil(s) · ${j.ouvertures} ouverture(s)`;
+          return j.qui ? entete + `\n      ${j.qui}` : entete;
+        })
         .join('\n') || '   aucune donnée pour le moment';
 
     const totalRefus = (data.refus || []).reduce((n, r) => n + r.n, 0);
@@ -1346,9 +1349,12 @@ async function montrerAppareils() {
       ' · connu depuis ' + quand(a.premiereFois));
     activite.style.cssText = 'font-size:12px;color:#64748b;margin-top:2px;';
 
+    const barreBoutons = el('div');
+    barreBoutons.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
+
     const bouton = el('button', 'btn-cancel', a.nomAdmin ? 'Renommer' : 'Nommer');
     bouton.type = 'button';
-    bouton.style.cssText = 'margin-top:8px;padding:6px 12px;font-size:13px;';
+    bouton.style.cssText = 'padding:6px 12px;font-size:13px;';
     bouton.addEventListener('click', async () => {
       const saisi = await demanderTexte('Nom de cet appareil', a.nomAdmin || a.nomDeclare || '');
       if (saisi === null) return;
@@ -1363,7 +1369,29 @@ async function montrerAppareils() {
       }
     });
 
-    ligne.append(titre, detail, activite, bouton);
+    const suppr = el('button', 'btn-delete', 'Oublier');
+    suppr.type = 'button';
+    suppr.style.cssText = 'padding:6px 12px;font-size:13px;';
+    suppr.addEventListener('click', async () => {
+      const ok = await showDialog({
+        title: 'Oublier cet appareil ?',
+        message: 'Sa fiche et ses statistiques de visite disparaissent.\n\n'
+          + "L'historique des modifications qu'il a faites est conservé, mais elles "
+          + "n'afficheront plus de nom.\n\nS'il revient, il réapparaîtra comme un nouvel appareil.",
+        okText: 'Oublier', cancelText: 'Annuler'
+      });
+      if (!ok) return;
+      try {
+        await api('/api/appareils', { method: 'DELETE', body: JSON.stringify({ id: a.id }) });
+        ligne.remove();
+        showToast('Appareil oublié');
+      } catch {
+        showToast('Échec de la suppression');
+      }
+    });
+
+    barreBoutons.append(bouton, suppr);
+    ligne.append(titre, detail, activite, barreBoutons);
     corps.appendChild(ligne);
   });
 
