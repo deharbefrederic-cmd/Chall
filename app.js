@@ -1380,7 +1380,9 @@ async function montrerAppareils() {
 
     const suppr = el('button', 'btn-delete', 'Oublier');
     suppr.type = 'button';
-    suppr.style.cssText = 'padding:6px 12px;font-size:13px;';
+    // La feuille de style masque .btn-delete par défaut (le bouton Supprimer
+    // des fiches n'apparaît que dans certains cas) : il faut le réafficher ici.
+    suppr.style.cssText = 'display:block;padding:6px 12px;font-size:13px;';
     suppr.addEventListener('click', async () => {
       const ok = await showDialog({
         title: 'Oublier cet appareil ?',
