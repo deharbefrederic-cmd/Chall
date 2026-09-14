@@ -1925,6 +1925,60 @@ window.addEventListener('appinstalled', async () => {
   }
 });
 
+/* --------------------------- geste de retour --------------------------- */
+
+/**
+ * Le geste de retour d'Android referme d'abord ce qui est ouvert — fenêtre,
+ * filtre, résultats de proximité — et ne quitte l'appli qu'ensuite.
+ *
+ * Principe : on garde en permanence une entrée d'historique en réserve. Le
+ * geste la consomme, on agit, puis on en repose une. Quand il n'y a plus rien
+ * à refermer, on laisse le navigateur reculer pour de bon.
+ */
+
+function fenetreOuverte() {
+  const visibles = [...document.querySelectorAll('.modal')].filter(
+    // L'écran de clé d'accès ne se referme pas : sans clé, il n'y a pas d'appli.
+    (m) => m.style.display === 'flex' && m.id !== 'gateModal'
+  );
+  return visibles.length ? visibles[visibles.length - 1] : null;
+}
+
+/** Referme une fenêtre via son propre bouton, pour que sa logique se déroule. */
+function refermerFenetre(modal) {
+  const boutons = [...modal.querySelectorAll('button')].filter((b) => b.offsetParent !== null);
+  const sortie = boutons.find((b) => /annuler|fermer|plus tard|compris/i.test(b.textContent));
+  if (!sortie) return false; // pas de sortie neutre : on ne touche à rien
+  sortie.click();
+  return true;
+}
+
+function poserGarde() {
+  history.pushState({ chall: true }, '');
+}
+
+window.addEventListener('popstate', () => {
+  const fenetre = fenetreOuverte();
+  if (fenetre && refermerFenetre(fenetre)) {
+    poserGarde();
+    return;
+  }
+
+  if (proximite !== null || searchInput.value) {
+    quitterProximite();
+    searchInput.value = '';
+    searchInput.blur();
+    renderList();
+    poserGarde();
+    return;
+  }
+
+  // Plus rien à refermer : on quitte réellement.
+  history.back();
+});
+
+poserGarde();
+
 /* ------------------------------ démarrage ------------------------------- */
 
 window.addEventListener('online', async () => {
