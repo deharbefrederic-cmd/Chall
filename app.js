@@ -366,18 +366,50 @@ function buildCard(item) {
   }
 
   const actions = el('div', 'actions');
-
-  const copyBtn = el('button', 'btn-action', '📋');
-  copyBtn.type = 'button';
-  copyBtn.setAttribute('aria-label', 'Copier le code de ' + item.address);
-  copyBtn.addEventListener('click', () => copyCode(item.code));
-
   const editBtn = el('button', 'btn-action', '✏️');
   editBtn.type = 'button';
-  editBtn.setAttribute('aria-label', 'Modifier ' + item.address);
-  editBtn.addEventListener('click', () => openEdit(item.id));
+  editBtn.setAttribute('aria-label', 'Appui long pour modifier ' + item.address);
+  editBtn.style.transition = 'background-color 600ms linear, transform 120ms';
 
-  actions.append(copyBtn, editBtn);
+  // Appui long : évite d'ouvrir la fiche par erreur en visant la copie.
+  let minuteurEdit = null;
+  let declenche = false;
+
+  const armer = (e) => {
+    e.stopPropagation();
+    declenche = false;
+    editBtn.style.backgroundColor = '#2563eb'; // remplissage progressif
+    minuteurEdit = setTimeout(() => {
+      declenche = true;
+      minuteurEdit = null;
+      editBtn.style.backgroundColor = '';
+      editBtn.style.transform = 'scale(0.9)';
+      setTimeout(() => { editBtn.style.transform = ''; }, 120);
+      if (navigator.vibrate) navigator.vibrate(20);
+      openEdit(item.id);
+    }, 600);
+  };
+
+  const desarmer = () => {
+    clearTimeout(minuteurEdit);
+    minuteurEdit = null;
+    editBtn.style.backgroundColor = '';
+  };
+
+  editBtn.addEventListener('pointerdown', armer);
+  editBtn.addEventListener('pointerup', desarmer);
+  editBtn.addEventListener('pointerleave', desarmer);
+  editBtn.addEventListener('pointercancel', desarmer);
+  editBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // Un appui bref n'ouvre rien, mais explique quoi faire.
+  editBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!declenche) showToast('Appui long pour modifier');
+    declenche = false;
+  });
+
+  actions.appendChild(editBtn);
   card.append(info, actions);
   return card;
 }
@@ -423,15 +455,6 @@ function updateStatus(text) {
   if (pending) syncStatus.textContent = `📦 ${pending} en attente`;
   else if (!navigator.onLine) syncStatus.textContent = '🔴 Hors ligne';
   else syncStatus.textContent = '🟢 À jour';
-}
-
-async function copyCode(value) {
-  try {
-    await navigator.clipboard.writeText(value);
-    showToast('Code copié : ' + value);
-  } catch {
-    showToast('Code : ' + value); // clipboard refusé hors HTTPS ou sans geste utilisateur
-  }
 }
 
 /* ------------------------ chargement et synchro ------------------------- */
@@ -957,18 +980,34 @@ function panneau(titre, corps, boutons) {
     box.appendChild(el('h3', null, titre));
     if (corps) box.appendChild(corps);
 
-    const barre = el('div', 'modal-btns');
-    barre.style.cssText = 'justify-content:flex-end;gap:10px;flex-wrap:wrap;';
-    boutons.forEach((b) => {
+    // Grille à deux colonnes : des boutons de largeur égale, pas d'escalier.
+    // Une entrée isolée (« Fermer ») occupe toute la largeur.
+    const barre = el('div');
+    barre.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px;';
+
+    const principaux = boutons.filter((b) => b.valeur !== null);
+    const sortie = boutons.filter((b) => b.valeur === null);
+
+    const creer = (b, pleineLargeur) => {
       const bouton = el('button', b.classe || 'btn-save', b.texte);
       bouton.type = 'button';
+      bouton.style.cssText =
+        'width:100%;padding:13px 8px;font-size:15px;' +
+        (pleineLargeur ? 'grid-column:1 / -1;' : '');
       bouton.addEventListener('click', () => {
         libererFond();
         modal.remove();
         resolve(b.valeur);
       });
       barre.appendChild(bouton);
-    });
+    };
+
+    // Nombre impair : le dernier bouton principal prend toute la largeur.
+    principaux.forEach((b, i) =>
+      creer(b, principaux.length % 2 === 1 && i === principaux.length - 1)
+    );
+    sortie.forEach((b) => creer(b, true));
+
     box.appendChild(barre);
     modal.appendChild(box);
     document.body.appendChild(modal);
