@@ -745,6 +745,7 @@ $('openAddModal').addEventListener('click', () => {
   deleteBtn.style.display = 'none';
   hsToggleBtn.style.display = 'none';
   hideSuggestions();
+  rafraichirSignature();
   editModal.style.display = 'flex';
   modalAddress.focus();
 });
@@ -772,6 +773,7 @@ function openEdit(id) {
   hsToggleBtn.style.background = item.hs ? '#059669' : '#d97706';
 
   hideSuggestions();
+  rafraichirSignature();
   editModal.style.display = 'flex';
 }
 
@@ -1169,9 +1171,10 @@ async function proposerPrenomApresContribution() {
 
   const corps = el('div');
   const texte = el('p', null,
-    "Votre contribution est visible par toute l'équipe. Vous pouvez y associer votre prénom, "
-    + "pour qu'on sache à qui s'adresser en cas de doute sur un code.");
-  texte.style.cssText = 'font-size:14px;color:#cbd5e1;line-height:1.5;margin-bottom:14px;';
+    "Bien joué, l'adresse est en ligne. 🎉\n\n"
+    + "On met votre prénom à côté ? Les collègues sauront qui remercier.");
+  texte.style.cssText =
+    'font-size:14px;color:#cbd5e1;line-height:1.5;margin-bottom:14px;white-space:pre-line;';
   const champ = document.createElement('input');
   champ.type = 'text';
   champ.maxLength = 30;
@@ -1182,15 +1185,15 @@ async function proposerPrenomApresContribution() {
   const modal = el('div', 'modal');
   modal.style.display = 'flex';
   const box = el('div', 'modal-content');
-  box.appendChild(el('h3', null, 'Signer vos ajouts ?'));
+  box.appendChild(el('h3', null, "C'est signé qui ?"));
   box.appendChild(corps);
 
   await new Promise((resolve) => {
     const barre = el('div', 'modal-btns');
     barre.style.cssText = 'justify-content:flex-end;gap:10px;';
-    const passer = el('button', 'btn-cancel', 'Non merci');
+    const passer = el('button', 'btn-cancel', 'Plus tard');
     passer.type = 'button';
-    const valider = el('button', 'btn-save', 'Valider');
+    const valider = el('button', 'btn-save', "C'est moi");
     valider.type = 'button';
     const fin = () => { libererFond(); modal.remove(); resolve(); };
     passer.addEventListener('click', fin);
@@ -1214,6 +1217,37 @@ async function proposerPrenomApresContribution() {
     champ.focus();
   });
 }
+
+/* ------------------------- signature du livreur ------------------------- */
+
+// Accessible en permanence sous le champ Code : un refus initial n'enferme
+// personne, et on peut se retirer aussi facilement qu'on s'est signé.
+const ligneSignature = el('button', null, '');
+ligneSignature.type = 'button';
+ligneSignature.style.cssText =
+  'display:block;width:100%;text-align:left;background:transparent;border:0;padding:6px 2px 2px;' +
+  'color:#64748b;font-size:13px;';
+modalCode.insertAdjacentElement('afterend', ligneSignature);
+
+function rafraichirSignature() {
+  const nom = localStorage.getItem(NOM_KEY);
+  ligneSignature.textContent = nom ? '✎ Signé : ' + nom : '✎ Signer mes ajouts';
+}
+
+ligneSignature.addEventListener('click', async () => {
+  const actuel = localStorage.getItem(NOM_KEY) || '';
+  const saisi = await demanderTexte('Votre prénom (laisser vide pour retirer)', actuel);
+  if (saisi === null) return;
+
+  if (saisi) localStorage.setItem(NOM_KEY, saisi);
+  else localStorage.removeItem(NOM_KEY);
+
+  // Plus de relance automatique : le choix est désormais explicite.
+  localStorage.setItem('chall_nom_demande', 'oui');
+  rafraichirSignature();
+  showToast(saisi ? "C'est noté, " + saisi + ' 👍' : 'Signature retirée');
+  await loadData({ silent: true });
+});
 
 /** Écran d'administration : liste des appareils, avec étiquetage manuel. */
 async function montrerAppareils() {
