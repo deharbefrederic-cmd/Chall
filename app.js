@@ -789,7 +789,33 @@ $('openAddModal').addEventListener('click', () => {
   rafraichirSignature();
   editModal.style.display = 'flex';
   modalAddress.focus();
+  proposerAdressesProches();
 });
+
+/**
+ * À l'ouverture d'un ajout, propose les adresses officielles autour de soi.
+ * On est devant l'immeuble : la bonne adresse est presque toujours dans la
+ * liste, et il n'y a rien à taper.
+ */
+async function proposerAdressesProches() {
+  if (!positionAutorisee || !navigator.onLine) return;
+
+  try {
+    const point = positionRecente() || (await obtenirPosition({ timeout: 6000 }));
+    // L'utilisateur a pu commencer à taper pendant l'attente.
+    if (modalAddress.value.trim() || editModal.style.display !== 'flex') return;
+
+    const noms = await adressesAutour(point.lat, point.lon, 80);
+    if (modalAddress.value.trim() || editModal.style.display !== 'flex') return;
+
+    // Les adresses déjà enregistrées ne sont pas proposées : on ajoute
+    // rarement une fiche qui existe.
+    const nouvelles = noms.filter((nom) => fichesPour(nom).length === 0);
+    showSuggestions(nouvelles.slice(0, 6));
+  } catch {
+    /* position ou service indisponible : saisie normale */
+  }
+}
 
 $('cancelModal').addEventListener('click', () => {
   hideSuggestions();
@@ -1577,6 +1603,64 @@ function fichesPour(adresse) {
   });
 }
 
+// Dernière position connue. La garder évite d'attendre le GPS à chaque fois :
+// c'est ce qui rendait la recherche autour de soi lente.
+let dernierePosition = null;
+
+function positionRecente(ageMax = 90000) {
+  if (!dernierePosition) return null;
+  return Date.now() - dernierePosition.ts < ageMax ? dernierePosition : null;
+}
+
+function obtenirPosition({ timeout = 8000 } = {}) {
+  return new Promise((ok, ko) => {
+    if (!navigator.geolocation) {
+      ko(new Error('indisponible'));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        dernierePosition = {
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          ts: Date.now()
+        };
+        ok(dernierePosition);
+      },
+      ko,
+      { enableHighAccuracy: true, timeout, maximumAge: 60000 }
+    );
+  });
+}
+
+/** Demande la position sans rien afficher, pour l'avoir prête au besoin. */
+function prechaufferPosition() {
+  if (!positionAutorisee || positionRecente(60000)) return;
+  obtenirPosition({ timeout: 10000 }).catch(() => {});
+}
+
+/** Adresses officielles autour d'un point, triées par distance. */
+async function adressesAutour(lat, lon, rayon = RAYON_METRES) {
+  const cercle = JSON.stringify({ type: 'Circle', coordinates: [lon, lat], radius: rayon });
+  const url =
+    'https://data.geopf.fr/geocodage/reverse?index=address&limit=30' +
+    '&lon=' + lon + '&lat=' + lat +
+    '&searchgeom=' + encodeURIComponent(cercle);
+
+  // Service tiers : aucun en-tête de l'application n'y est joint, et la
+  // position ne quitte pas cet appel — rien n'est envoyé à ton serveur.
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('service indisponible');
+  const data = await res.json();
+
+  const noms = [];
+  for (const feature of data.features || []) {
+    const nom = (feature.properties || {}).name;
+    if (nom && !noms.includes(nom)) noms.push(nom);
+  }
+  return noms;
+}
+
 function quitterProximite() {
   if (proximite === null) return;
   proximite = null;
@@ -1593,42 +1677,25 @@ async function autourDeMoi() {
     return;
   }
 
-  updateStatus('📍 Localisation...');
+  const connue = positionRecente();
+  if (!connue) updateStatus('📍 Localisation...');
 
-  let position;
+  let point;
   try {
-    position = await new Promise((ok, ko) =>
-      navigator.geolocation.getCurrentPosition(ok, ko, {
-        enableHighAccuracy: true,
-        timeout: 8000,
-        maximumAge: 30000
-      })
-    );
+    point = connue || (await obtenirPosition());
   } catch {
     updateStatus();
     showToast('Position refusée ou indisponible');
     return;
   }
 
-  const { latitude: lat, longitude: lon } = position.coords;
-  const cercle = JSON.stringify({ type: 'Circle', coordinates: [lon, lat], radius: RAYON_METRES });
-  const url =
-    'https://data.geopf.fr/geocodage/reverse?index=address&limit=30' +
-    '&lon=' + lon + '&lat=' + lat +
-    '&searchgeom=' + encodeURIComponent(cercle);
-
+  const { lat, lon } = point;
   try {
-    // Service tiers : aucun en-tête de l'application n'y est joint, et la
-    // position ne quitte pas cet appel — rien n'est envoyé à ton serveur.
-    const res = await fetch(url);
-    if (!res.ok) throw new Error();
-    const data = await res.json();
+    const adresses = await adressesAutour(lat, lon);
 
     // Les résultats arrivent triés par distance : on conserve cet ordre.
     const vus = new Set();
-    for (const feature of data.features || []) {
-      const nom = (feature.properties || {}).name;
-      if (!nom) continue;
+    for (const nom of adresses) {
       for (const fiche of fichesPour(nom)) vus.add(fiche.id);
     }
 
@@ -1652,13 +1719,17 @@ async function autourDeMoi() {
 const btnProximite = el('button', 'btn-toggle-recent', '📍 Autour de moi');
 btnProximite.type = 'button';
 btnProximite.addEventListener('click', autourDeMoi);
+btnProximite.style.display = 'none';
 filterRecentBtn.insertAdjacentElement('beforebegin', btnProximite);
 
 let positionAutorisee = false;
 
 function majBoutonProximite(etat) {
   positionAutorisee = etat === 'granted';
-  btnProximite.style.display = positionAutorisee ? 'none' : '';
+  // Le bouton ne sert qu'à accorder l'autorisation. Il n'apparaît donc que
+  // pendant la saisie, et disparaît définitivement une fois accordée.
+  btnProximite.style.display = 'none';
+  if (positionAutorisee) prechaufferPosition();
 }
 
 (async function suivrePermissionPosition() {
@@ -1677,8 +1748,17 @@ function majBoutonProximite(etat) {
 // l'autorisation est déjà accordée : pas de demande de position surgissant
 // dès qu'on touche le champ.
 searchInput.addEventListener('focus', () => {
-  if (searchInput.value || proximite !== null || !positionAutorisee) return;
-  autourDeMoi();
+  if (searchInput.value || proximite !== null) return;
+  if (positionAutorisee) autourDeMoi();
+  else btnProximite.style.display = '';
+});
+
+searchInput.addEventListener('blur', () => {
+  // Laisse le temps d'appuyer sur le bouton avant de le retirer.
+  setTimeout(() => {
+    if (positionAutorisee || document.activeElement === searchInput) return;
+    btnProximite.style.display = 'none';
+  }, 200);
 });
 
 /* ------------------------ installation et statistiques ------------------ */
@@ -1756,6 +1836,7 @@ window.addEventListener('offline', () => updateStatus());
 
 document.addEventListener('visibilitychange', async () => {
   if (document.visibilityState !== 'visible' || !navigator.onLine || !getAccessKey()) return;
+  prechaufferPosition();
   if (await flushOutbox()) await loadData({ silent: true });
 });
 
