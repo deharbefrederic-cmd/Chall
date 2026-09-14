@@ -1612,10 +1612,10 @@ function positionRecente(ageMax = 90000) {
   return Date.now() - dernierePosition.ts < ageMax ? dernierePosition : null;
 }
 
-function obtenirPosition({ timeout = 8000 } = {}) {
+function unePosition(options) {
   return new Promise((ok, ko) => {
     if (!navigator.geolocation) {
-      ko(new Error('indisponible'));
+      ko({ code: 2 });
       return;
     }
     navigator.geolocation.getCurrentPosition(
@@ -1628,9 +1628,31 @@ function obtenirPosition({ timeout = 8000 } = {}) {
         ok(dernierePosition);
       },
       ko,
-      { enableHighAccuracy: true, timeout, maximumAge: 60000 }
+      options
     );
   });
+}
+
+/**
+ * Essaie d'abord le GPS précis, puis se rabat sur la localisation par réseau.
+ * En intérieur, le GPS n'accroche souvent pas : sans ce repli, la demande
+ * échouait purement et simplement.
+ */
+async function obtenirPosition({ timeout = 6000 } = {}) {
+  try {
+    return await unePosition({ enableHighAccuracy: true, timeout, maximumAge: 60000 });
+  } catch (err) {
+    // Une autorisation refusée ne se rattrape pas : inutile de réessayer.
+    if (err && err.code === 1) throw err;
+    return unePosition({ enableHighAccuracy: false, timeout: 8000, maximumAge: 180000 });
+  }
+}
+
+/** Message fidèle à la cause réelle. */
+function messagePosition(err) {
+  if (err && err.code === 1) return 'Position non autorisée pour ce site';
+  if (err && err.code === 3) return 'Position trop longue à obtenir';
+  return 'Position indisponible ici';
 }
 
 /** Distance approximative entre deux points, en mètres. */
@@ -1757,9 +1779,9 @@ async function autourDeMoi() {
   let point;
   try {
     point = connue || (await obtenirPosition());
-  } catch {
+  } catch (err) {
     updateStatus();
-    showToast('Position refusée ou indisponible');
+    showToast(messagePosition(err));
     return;
   }
 
