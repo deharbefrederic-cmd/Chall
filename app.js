@@ -1584,7 +1584,7 @@ filterRecentBtn.addEventListener('click', () => {
 
 /* --------------------------- autour de moi --------------------------- */
 
-const RAYON_METRES = 150;
+const RAYON_METRES = 80;
 
 // Identifiants des fiches proches, dans l'ordre de distance. null = inactif.
 let proximite = null;
