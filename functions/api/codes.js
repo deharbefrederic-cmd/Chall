@@ -9,9 +9,11 @@ export async function onRequestGet(context) {
 
   const { results } = await db
     .prepare(
-      `SELECT id, address, code, hs, created_at, updated_at, author
-       FROM codes
-       ORDER BY address COLLATE NOCASE`
+      `SELECT c.id, c.address, c.code, c.hs, c.created_at, c.updated_at, c.author,
+              c.groupe_id, d.nom_declare AS par_qui
+       FROM codes c
+       LEFT JOIN devices d ON d.client_id = c.maj_par
+       ORDER BY c.address COLLATE NOCASE`
     )
     .all();
 
@@ -76,8 +78,8 @@ export async function onRequestPost(context) {
   try {
     await db
       .prepare(
-        `INSERT INTO codes (id, address, norm_address, code, hs, created_at, updated_at, author)
-         VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5, ?6)
+        `INSERT INTO codes (id, address, norm_address, code, hs, created_at, updated_at, author, maj_par)
+         VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5, ?6, ?6)
          ON CONFLICT(id) DO NOTHING`
       )
       .bind(id, adresseFinale, norm, code, now, author)
@@ -113,5 +115,10 @@ export async function onRequestPost(context) {
     .bind(id)
     .first();
 
-  return json({ record: toRecord(created, author), corrige: officielle || null }, 201);
+  // Le prénom que le client vient d'envoyer est déjà la bonne valeur :
+  // inutile d'aller le relire en base.
+  return json(
+    { record: toRecord({ ...created, par_qui: deviceNom(request) }, author), corrige: officielle || null },
+    201
+  );
 }
