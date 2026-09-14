@@ -20,6 +20,7 @@ export async function onRequestGet(context) {
   return json({
     appareils: (results || []).map((r) => ({
       id: r.client_id,
+      court: r.client_id.slice(0, 8),
       plateforme: r.platform,
       modele: r.model,
       nomDeclare: r.nom_declare,

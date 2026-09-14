@@ -37,7 +37,7 @@ export async function onRequestGet(context) {
         `SELECT v.jour,
                 COUNT(*) AS appareils,
                 SUM(v.ouvertures) AS ouvertures,
-                GROUP_CONCAT(COALESCE(d.nom_admin, d.nom_declare, d.model, d.platform), ', ') AS qui
+                GROUP_CONCAT(COALESCE(d.nom_admin, d.nom_declare, d.model, substr(v.client_id, 1, 8)), ', ') AS qui
          FROM visites v
          LEFT JOIN devices d ON d.client_id = v.client_id
          WHERE v.jour >= ?1
