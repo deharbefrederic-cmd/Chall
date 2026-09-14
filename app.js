@@ -10,6 +10,7 @@ const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
 const ACCESS_KEY = 'chall_access_key';
 const ADMIN_KEY = 'chall_admin_key';
+const NOM_KEY = 'chall_nom';
 const CLIENT_KEY = 'chall_client_id';
 const RECENT_MS = 7 * 24 * 60 * 60 * 1000;
 const DELETE_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -129,6 +130,7 @@ async function api(path, options = {}) {
     'X-Chall-Client': getClientId(),
     'X-Chall-Mode': standalone ? 'app' : 'web',
     ...(localStorage.getItem(ADMIN_KEY) ? { 'X-Chall-Admin': localStorage.getItem(ADMIN_KEY) } : {}),
+    ...(localStorage.getItem(NOM_KEY) ? { 'X-Chall-Nom': localStorage.getItem(NOM_KEY) } : {}),
     ...(options.body ? { 'Content-Type': 'application/json' } : {})
   };
 
@@ -1088,14 +1090,16 @@ async function montrerJournal() {
       });
       const nom = e.ancienneAdresse;
 
+      const par = e.auteur ? `  (${e.auteur})` : '';
+
       if (e.action === 'create') {
-        lignes.push(`${quand}  ${nom}\n   créée (code ${e.ancienCode})`);
+        lignes.push(`${quand}  ${nom}\n   créée (code ${e.ancienCode})${par}`);
       } else if (e.action === 'delete') {
-        lignes.push(`${quand}  ${nom}\n   supprimée (code ${e.ancienCode})`);
+        lignes.push(`${quand}  ${nom}\n   supprimée (code ${e.ancienCode})${par}`);
       } else if (e.ancienCode !== apres.code) {
-        lignes.push(`${quand}  ${nom}\n   ${e.ancienCode} → ${apres.code}`);
+        lignes.push(`${quand}  ${nom}\n   ${e.ancienCode} → ${apres.code}${par}`);
       } else if (e.ancienneAdresse !== apres.adresse) {
-        lignes.push(`${quand}  ${nom}\n   renommée en ${apres.adresse}`);
+        lignes.push(`${quand}  ${nom}\n   renommée en ${apres.adresse}${par}`);
       }
       // Les modifications sans effet réel ne sont pas affichées.
     }
@@ -1147,6 +1151,157 @@ function exporterCsv() {
   showToast(records.length + ' adresses exportées');
 }
 
+/** Demande le prénom une seule fois, et laisse la possibilité de passer. */
+async function proposerPrenom() {
+  if (localStorage.getItem(NOM_KEY) || localStorage.getItem('chall_nom_demande')) return;
+  localStorage.setItem('chall_nom_demande', 'oui');
+
+  const corps = el('div');
+  const texte = el('p', null,
+    "Facultatif. Il apparaîtra à côté de vos modifications, pour que l'équipe sache qui a changé quoi.");
+  texte.style.cssText = 'font-size:14px;color:#94a3b8;line-height:1.4;margin-bottom:12px;';
+  const champ = document.createElement('input');
+  champ.type = 'text';
+  champ.maxLength = 30;
+  champ.autocomplete = 'given-name';
+  corps.append(texte, champ);
+
+  const modal = el('div', 'modal');
+  modal.style.display = 'flex';
+  const box = el('div', 'modal-content');
+  box.appendChild(el('h3', null, 'Votre prénom ?'));
+  box.appendChild(corps);
+
+  await new Promise((resolve) => {
+    const barre = el('div', 'modal-btns');
+    barre.style.cssText = 'justify-content:flex-end;gap:10px;';
+    const passer = el('button', 'btn-cancel', 'Passer');
+    passer.type = 'button';
+    const valider = el('button', 'btn-save', 'Valider');
+    valider.type = 'button';
+    const fin = () => { libererFond(); modal.remove(); resolve(); };
+    passer.addEventListener('click', fin);
+    valider.addEventListener('click', () => {
+      const v = champ.value.trim();
+      if (v) localStorage.setItem(NOM_KEY, v);
+      fin();
+    });
+    barre.append(passer, valider);
+    box.appendChild(barre);
+    modal.appendChild(box);
+    document.body.appendChild(modal);
+    verrouillerFond();
+    champ.focus();
+  });
+}
+
+/** Écran d'administration : liste des appareils, avec étiquetage manuel. */
+async function montrerAppareils() {
+  let data;
+  try {
+    data = await api('/api/appareils');
+  } catch (err) {
+    if (err.status === 403) localStorage.removeItem(ADMIN_KEY);
+    await showDialog({
+      title: 'Appareils indisponibles',
+      message: err.status === 403 ? "Clé d'administration refusée." : 'Le serveur n’a pas répondu.',
+      showCancel: false, okText: 'Compris'
+    });
+    return;
+  }
+
+  const liste = data.appareils || [];
+  if (!liste.length) {
+    await showDialog({
+      title: '📱 Appareils', message: 'Aucun appareil enregistré.',
+      showCancel: false, okText: 'Fermer'
+    });
+    return;
+  }
+
+  const corps = el('div');
+  corps.style.cssText = 'max-height:55vh;overflow-y:auto;touch-action:pan-y;overscroll-behavior:contain;';
+
+  const quand = (t) => {
+    const j = Math.floor((Date.now() - t) / 86400000);
+    if (j <= 0) return "aujourd'hui";
+    if (j === 1) return 'hier';
+    return 'il y a ' + j + ' j';
+  };
+
+  liste.forEach((a) => {
+    const ligne = el('div');
+    ligne.style.cssText = 'padding:12px 4px;border-bottom:1px solid #1e293b;';
+
+    const titre = el('div', null, a.nomAdmin || a.nomDeclare || a.modele || a.plateforme);
+    titre.style.cssText = 'font-size:15px;font-weight:600;color:#e2e8f0;';
+
+    const detail = el('div', null,
+      [a.plateforme, a.modele, a.nomDeclare ? 'se dit « ' + a.nomDeclare + ' »' : null]
+        .filter(Boolean).join(' · '));
+    detail.style.cssText = 'font-size:12px;color:#64748b;margin-top:2px;';
+
+    const activite = el('div', null,
+      a.modifications + ' modification(s) · vu ' + quand(a.derniereFois) +
+      ' · connu depuis ' + quand(a.premiereFois));
+    activite.style.cssText = 'font-size:12px;color:#64748b;margin-top:2px;';
+
+    const bouton = el('button', 'btn-cancel', a.nomAdmin ? 'Renommer' : 'Nommer');
+    bouton.type = 'button';
+    bouton.style.cssText = 'margin-top:8px;padding:6px 12px;font-size:13px;';
+    bouton.addEventListener('click', async () => {
+      const saisi = await demanderTexte('Nom de cet appareil', a.nomAdmin || a.nomDeclare || '');
+      if (saisi === null) return;
+      try {
+        await api('/api/appareils', { method: 'PATCH', body: JSON.stringify({ id: a.id, nom: saisi }) });
+        a.nomAdmin = saisi || null;
+        titre.textContent = a.nomAdmin || a.nomDeclare || a.modele || a.plateforme;
+        bouton.textContent = a.nomAdmin ? 'Renommer' : 'Nommer';
+        showToast('Appareil nommé');
+      } catch {
+        showToast('Échec de l’enregistrement');
+      }
+    });
+
+    ligne.append(titre, detail, activite, bouton);
+    corps.appendChild(ligne);
+  });
+
+  await panneau('📱 Appareils', corps, [{ texte: 'Fermer', valeur: null, classe: 'btn-cancel' }]);
+}
+
+/** Petite saisie de texte. Renvoie null si l'utilisateur annule. */
+function demanderTexte(titre, valeurInitiale) {
+  return new Promise((resolve) => {
+    const champ = document.createElement('input');
+    champ.type = 'text';
+    champ.maxLength = 30;
+    champ.value = valeurInitiale || '';
+
+    const modal = el('div', 'modal');
+    modal.style.display = 'flex';
+    const box = el('div', 'modal-content');
+    box.appendChild(el('h3', null, titre));
+    box.appendChild(champ);
+
+    const barre = el('div', 'modal-btns');
+    barre.style.cssText = 'justify-content:flex-end;gap:10px;';
+    const annuler = el('button', 'btn-cancel', 'Annuler');
+    annuler.type = 'button';
+    const ok = el('button', 'btn-save', 'Valider');
+    ok.type = 'button';
+    const fin = (v) => { libererFond(); modal.remove(); resolve(v); };
+    annuler.addEventListener('click', () => fin(null));
+    ok.addEventListener('click', () => fin(champ.value.trim()));
+    barre.append(annuler, ok);
+    box.appendChild(barre);
+    modal.appendChild(box);
+    document.body.appendChild(modal);
+    verrouillerFond();
+    champ.focus();
+  });
+}
+
 async function ouvrirAdmin() {
   if (!localStorage.getItem(ADMIN_KEY)) {
     const ok = await demanderCleAdmin();
@@ -1157,12 +1312,14 @@ async function ouvrirAdmin() {
     const choix = await panneau('🔧 Administration', null, [
       { texte: '📊 Statistiques', valeur: 'stats' },
       { texte: '🕘 Journal', valeur: 'journal' },
+      { texte: '📱 Appareils', valeur: 'appareils' },
       { texte: '💾 Exporter', valeur: 'export' },
       { texte: '🔗 Lien d\'accès', valeur: 'lien' },
       { texte: 'Fermer', valeur: null, classe: 'btn-cancel' }
     ]);
 
     if (choix === 'stats') await montrerStats();
+    else if (choix === 'appareils') await montrerAppareils();
     else if (choix === 'journal') await montrerJournal();
     else if (choix === 'export') { exporterCsv(); return; }
     else if (choix === 'lien') await partagerLien();
@@ -1334,4 +1491,5 @@ if ('serviceWorker' in navigator) {
   await flushOutbox();
   await loadData();
   trackDeviceInstallation();
+  proposerPrenom();
 })();
