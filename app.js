@@ -359,7 +359,11 @@ function buildCard(item) {
   info.appendChild(row);
 
   const dateLabel = formatUpdateDate(item.updatedAt);
-  if (dateLabel) info.appendChild(el('div', 'updated-date', '🕒 Modifié : ' + dateLabel));
+  if (dateLabel) {
+    // Seul le prénom déclaré est public. Le modèle de l'appareil ne l'est jamais.
+    const par = item.parQui ? ' · par ' + item.parQui : '';
+    info.appendChild(el('div', 'updated-date', '🕒 Modifié : ' + dateLabel + par));
+  }
 
   const actions = el('div', 'actions');
 
@@ -881,6 +885,7 @@ saveBtn.addEventListener('click', async () => {
       } else {
         showToast('Adresse ajoutée');
       }
+      if (res.ok) await proposerPrenomApresContribution();
       return;
     }
 
@@ -929,6 +934,8 @@ saveBtn.addEventListener('click', async () => {
     if (!res.ok) showToast(res.err.message);
     else if (aussi.length) showToast((aussi.length + 1) + ' fiches mises à jour');
     else showToast('Fiche mise à jour');
+
+    if (res.ok) await proposerPrenomApresContribution();
   } finally {
     saveBtn.disabled = false;
     isBusy = false;
@@ -1151,39 +1158,52 @@ function exporterCsv() {
   showToast(records.length + ' adresses exportées');
 }
 
-/** Demande le prénom une seule fois, et laisse la possibilité de passer. */
-async function proposerPrenom() {
+/**
+ * Proposé après une première contribution, jamais à l'ouverture : à ce
+ * moment-là le livreur vient de faire quelque chose et voit à quoi ça sert.
+ * Une seule fois ; un refus n'est jamais relancé.
+ */
+async function proposerPrenomApresContribution() {
   if (localStorage.getItem(NOM_KEY) || localStorage.getItem('chall_nom_demande')) return;
   localStorage.setItem('chall_nom_demande', 'oui');
 
   const corps = el('div');
   const texte = el('p', null,
-    "Facultatif. Il apparaîtra à côté de vos modifications, pour que l'équipe sache qui a changé quoi.");
-  texte.style.cssText = 'font-size:14px;color:#94a3b8;line-height:1.4;margin-bottom:12px;';
+    "Votre contribution est visible par toute l'équipe. Vous pouvez y associer votre prénom, "
+    + "pour qu'on sache à qui s'adresser en cas de doute sur un code.");
+  texte.style.cssText = 'font-size:14px;color:#cbd5e1;line-height:1.5;margin-bottom:14px;';
   const champ = document.createElement('input');
   champ.type = 'text';
   champ.maxLength = 30;
   champ.autocomplete = 'given-name';
+  champ.placeholder = 'Prénom';
   corps.append(texte, champ);
 
   const modal = el('div', 'modal');
   modal.style.display = 'flex';
   const box = el('div', 'modal-content');
-  box.appendChild(el('h3', null, 'Votre prénom ?'));
+  box.appendChild(el('h3', null, 'Signer vos ajouts ?'));
   box.appendChild(corps);
 
   await new Promise((resolve) => {
     const barre = el('div', 'modal-btns');
     barre.style.cssText = 'justify-content:flex-end;gap:10px;';
-    const passer = el('button', 'btn-cancel', 'Passer');
+    const passer = el('button', 'btn-cancel', 'Non merci');
     passer.type = 'button';
     const valider = el('button', 'btn-save', 'Valider');
     valider.type = 'button';
     const fin = () => { libererFond(); modal.remove(); resolve(); };
     passer.addEventListener('click', fin);
-    valider.addEventListener('click', () => {
+    valider.addEventListener('click', async () => {
       const v = champ.value.trim();
-      if (v) localStorage.setItem(NOM_KEY, v);
+      if (v) {
+        localStorage.setItem(NOM_KEY, v);
+        fin();
+        // Rechargement : le serveur enregistre le prénom et le renvoie
+        // aussitôt sur les fiches concernées.
+        await loadData({ silent: true });
+        return;
+      }
       fin();
     });
     barre.append(passer, valider);
@@ -1491,5 +1511,4 @@ if ('serviceWorker' in navigator) {
   await flushOutbox();
   await loadData();
   trackDeviceInstallation();
-  proposerPrenom();
 })();
