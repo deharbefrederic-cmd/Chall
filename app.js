@@ -6,6 +6,10 @@
  * file d'attente rejouée au retour du réseau, rendu DOM sans innerHTML.
  * ------------------------------------------------------------------ */
 
+// Repère de version, affiché dans le panneau : permet de vérifier d'un coup
+// d'œil quelle version tourne réellement sur l'appareil.
+const VERSION = '14/09 15h';
+
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
 const ACCESS_KEY = 'chall_access_key';
@@ -1497,7 +1501,10 @@ async function ouvrirAdmin() {
   }
 
   while (true) {
-    const choix = await panneau('🔧 Administration', null, [
+    const versionLigne = el('p', null, 'Version ' + VERSION);
+    versionLigne.style.cssText = 'font-size:12px;color:#64748b;margin:-6px 0 4px;';
+
+    const choix = await panneau('🔧 Administration', versionLigne, [
       { texte: '📊 Statistiques', valeur: 'stats' },
       { texte: '🕘 Journal', valeur: 'journal' },
       { texte: '📱 Appareils', valeur: 'appareils' },

@@ -1,5 +1,5 @@
 // Bumper CACHE_VERSION à chaque déploiement pour forcer la mise à jour du shell.
-const CACHE_VERSION = 'chall-v2';
+const CACHE_VERSION = 'chall-v3';
 const SHELL = [
   '/',
   '/index.html',
@@ -50,19 +50,18 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Ressources statiques : cache d'abord, rafraîchi en arrière-plan.
+  // Ressources statiques : réseau d'abord, cache en secours.
+  // Le cache d'abord servait l'ancienne version après chaque déploiement, et
+  // il fallait deux ouvertures pour voir une modification.
   event.respondWith(
-    caches.match(request).then((cached) => {
-      const network = fetch(request)
-        .then((response) => {
-          if (response && response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+    fetch(request)
+      .then((response) => {
+        if (response && response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
+        }
+        return response;
+      })
+      .catch(() => caches.match(request))
   );
 });
