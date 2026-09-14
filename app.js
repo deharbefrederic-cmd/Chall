@@ -1936,17 +1936,28 @@ window.addEventListener('appinstalled', async () => {
  * à refermer, on laisse le navigateur reculer pour de bon.
  */
 
+/**
+ * Élément réellement affiché. On ne peut pas se fier à offsetParent : il vaut
+ * toujours null à l'intérieur d'un élément en position fixed, ce qui est le
+ * cas de toutes les fenêtres de l'appli.
+ */
+function estAffiche(element) {
+  const style = getComputedStyle(element);
+  if (style.display === 'none' || style.visibility === 'hidden') return false;
+  return element.getClientRects().length > 0;
+}
+
 function fenetreOuverte() {
   const visibles = [...document.querySelectorAll('.modal')].filter(
     // L'écran de clé d'accès ne se referme pas : sans clé, il n'y a pas d'appli.
-    (m) => m.style.display === 'flex' && m.id !== 'gateModal'
+    (m) => m.id !== 'gateModal' && estAffiche(m)
   );
   return visibles.length ? visibles[visibles.length - 1] : null;
 }
 
 /** Referme une fenêtre via son propre bouton, pour que sa logique se déroule. */
 function refermerFenetre(modal) {
-  const boutons = [...modal.querySelectorAll('button')].filter((b) => b.offsetParent !== null);
+  const boutons = [...modal.querySelectorAll('button')].filter(estAffiche);
   const sortie = boutons.find((b) => /annuler|fermer|plus tard|compris/i.test(b.textContent));
   if (!sortie) return false; // pas de sortie neutre : on ne touche à rien
   sortie.click();
@@ -1957,7 +1968,13 @@ function poserGarde() {
   history.pushState({ chall: true }, '');
 }
 
+let sortieEnCours = false;
+
 window.addEventListener('popstate', () => {
+  // Le history.back() de sortie déclenche lui-même un popstate : sans ce
+  // verrou, on pourrait boucler au lieu de quitter.
+  if (sortieEnCours) return;
+
   const fenetre = fenetreOuverte();
   if (fenetre && refermerFenetre(fenetre)) {
     poserGarde();
@@ -1974,6 +1991,7 @@ window.addEventListener('popstate', () => {
   }
 
   // Plus rien à refermer : on quitte réellement.
+  sortieEnCours = true;
   history.back();
 });
 
