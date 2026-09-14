@@ -1224,7 +1224,6 @@ async function proposerPrenomApresContribution() {
   const modal = el('div', 'modal');
   modal.style.display = 'flex';
   const box = el('div', 'modal-content');
-  box.appendChild(el('h3', null, "C'est signé qui ?"));
   box.appendChild(corps);
 
   await new Promise((resolve) => {
@@ -1234,19 +1233,27 @@ async function proposerPrenomApresContribution() {
     passer.type = 'button';
     const valider = el('button', 'btn-save', "C'est moi");
     valider.type = 'button';
+
+    // Inactif tant que rien n'est saisi : valider à vide reviendrait à
+    // refuser sans le vouloir, et la fenêtre ne revient jamais.
+    const majBouton = () => {
+      const vide = !champ.value.trim();
+      valider.disabled = vide;
+      valider.style.opacity = vide ? '0.45' : '';
+    };
+    champ.addEventListener('input', majBouton);
+    majBouton();
+
     const fin = () => { libererFond(); modal.remove(); resolve(); };
     passer.addEventListener('click', fin);
     valider.addEventListener('click', async () => {
       const v = champ.value.trim();
-      if (v) {
-        localStorage.setItem(NOM_KEY, v);
-        fin();
-        // Rechargement : le serveur enregistre le prénom et le renvoie
-        // aussitôt sur les fiches concernées.
-        await loadData({ silent: true });
-        return;
-      }
+      if (!v) return;
+      localStorage.setItem(NOM_KEY, v);
       fin();
+      // Rechargement : le serveur enregistre le prénom et le renvoie
+      // aussitôt sur les fiches concernées.
+      await loadData({ silent: true });
     });
     barre.append(passer, valider);
     box.appendChild(barre);
