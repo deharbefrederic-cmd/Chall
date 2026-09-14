@@ -217,6 +217,10 @@ function showDialog({ title, message, showCancel = true, okText = 'OK', cancelTe
     zone.style.overscrollBehavior = 'contain';
     zone.scrollTop = 0;
 
+    // Cette fenêtre est un élément fixe du document : replacée en fin de page,
+    // elle passe devant les panneaux créés à la volée (Appareils, groupes...),
+    // sinon la confirmation s'ouvrirait derrière eux, invisible.
+    document.body.appendChild(modal);
     modal.style.display = 'flex';
     verrouillerFond();
 
