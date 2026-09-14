@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '14/09 18h';
+const VERSION = '14/09 19h';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -1506,32 +1506,59 @@ function demanderTexte(titre, valeurInitiale) {
   });
 }
 
+/**
+ * Panneau d'administration. Il reste monté pendant qu'on navigue dans ses
+ * écrans : le recréer après coup produirait une entrée d'historique posée
+ * hors de tout geste, que Chrome ignore — et le geste de retour suivant
+ * quitterait l'appli au lieu de refermer le panneau.
+ */
 async function ouvrirAdmin() {
   if (!localStorage.getItem(ADMIN_KEY)) {
     const ok = await demanderCleAdmin();
     if (!ok) return;
   }
 
-  while (true) {
-    const versionLigne = el('p', null, 'Version ' + VERSION);
-    versionLigne.style.cssText = 'font-size:12px;color:#64748b;margin:-6px 0 4px;';
+  const modal = el('div', 'modal');
+  modal.style.display = 'flex';
+  const box = el('div', 'modal-content');
 
-    const choix = await panneau('🔧 Administration', versionLigne, [
-      { texte: '📊 Statistiques', valeur: 'stats' },
-      { texte: '🕘 Journal', valeur: 'journal' },
-      { texte: '📱 Appareils', valeur: 'appareils' },
-      { texte: '💾 Exporter', valeur: 'export' },
-      { texte: '🔗 Lien d\'accès', valeur: 'lien' },
-      { texte: 'Fermer', valeur: null, classe: 'btn-cancel' }
-    ]);
+  box.appendChild(el('h3', null, '🔧 Administration'));
 
-    if (choix === 'stats') await montrerStats();
-    else if (choix === 'appareils') await montrerAppareils();
-    else if (choix === 'journal') await montrerJournal();
-    else if (choix === 'export') { exporterCsv(); return; }
-    else if (choix === 'lien') await partagerLien();
-    else return;
-  }
+  const versionLigne = el('p', null, 'Version ' + VERSION);
+  versionLigne.style.cssText = 'font-size:12px;color:#64748b;margin:-6px 0 4px;';
+  box.appendChild(versionLigne);
+
+  const barre = el('div');
+  barre.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px;';
+
+  const fermer = () => {
+    libererFond();
+    modal.remove();
+  };
+
+  const ajouter = (texte, action, options = {}) => {
+    const bouton = el('button', options.classe || 'btn-save', texte);
+    bouton.type = 'button';
+    bouton.style.cssText =
+      'width:100%;padding:13px 8px;font-size:15px;' + (options.large ? 'grid-column:1 / -1;' : '');
+    bouton.addEventListener('click', action);
+    barre.appendChild(bouton);
+  };
+
+  ajouter('📊 Statistiques', () => montrerStats());
+  ajouter('🕘 Journal', () => montrerJournal());
+  ajouter('📱 Appareils', () => montrerAppareils());
+  ajouter('💾 Exporter', () => {
+    exporterCsv();
+    fermer();
+  });
+  ajouter("🔗 Lien d'accès", () => partagerLien(), { large: true });
+  ajouter('Fermer', fermer, { large: true, classe: 'btn-cancel' });
+
+  box.appendChild(barre);
+  modal.appendChild(box);
+  document.body.appendChild(modal);
+  verrouillerFond();
 }
 
 async function partagerLien() {
