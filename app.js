@@ -1026,8 +1026,13 @@ async function demanderCleAdmin() {
     "Réservé à l'administrateur. Cette clé est différente de celle des livreurs.");
   texte.style.cssText = 'font-size:14px;color:#94a3b8;line-height:1.4;margin-bottom:12px;';
   const champ = document.createElement('input');
-  champ.type = 'password';
+  // Pas de type="password" : Chrome enregistrerait la clé comme mot de passe
+  // du site et la proposerait ensuite dans la barre de recherche.
+  champ.type = 'text';
   champ.autocomplete = 'off';
+  champ.setAttribute('autocapitalize', 'off');
+  champ.setAttribute('spellcheck', 'false');
+  champ.style.webkitTextSecurity = 'disc';
   const erreur = el('p', 'gate-error');
   corps.append(texte, champ, erreur);
 
