@@ -1646,24 +1646,39 @@ async function autourDeMoi() {
   }
 }
 
-// Bouton dans la barre d'état, à gauche du filtre Récents.
+// Bouton dans la barre d'état, à gauche du filtre Récents. Il ne sert qu'à
+// accorder l'autorisation la première fois : une fois accordée, la recherche
+// déclenche seule la localisation et le bouton disparaît.
 const btnProximite = el('button', 'btn-toggle-recent', '📍 Autour de moi');
 btnProximite.type = 'button';
 btnProximite.addEventListener('click', autourDeMoi);
 filterRecentBtn.insertAdjacentElement('beforebegin', btnProximite);
 
+let positionAutorisee = false;
+
+function majBoutonProximite(etat) {
+  positionAutorisee = etat === 'granted';
+  btnProximite.style.display = positionAutorisee ? 'none' : '';
+}
+
+(async function suivrePermissionPosition() {
+  if (!navigator.permissions) return; // navigateur sans gestion des permissions
+  try {
+    const etat = await navigator.permissions.query({ name: 'geolocation' });
+    majBoutonProximite(etat.state);
+    // L'autorisation peut être accordée ou révoquée en cours de route.
+    etat.onchange = () => majBoutonProximite(etat.state);
+  } catch {
+    /* permission non interrogeable : le bouton reste disponible */
+  }
+})();
+
 // Déclenchement automatique à l'ouverture de la recherche, mais seulement si
 // l'autorisation est déjà accordée : pas de demande de position surgissant
 // dès qu'on touche le champ.
-searchInput.addEventListener('focus', async () => {
-  if (searchInput.value || proximite !== null) return;
-  if (!navigator.permissions) return;
-  try {
-    const etat = await navigator.permissions.query({ name: 'geolocation' });
-    if (etat.state === 'granted') autourDeMoi();
-  } catch {
-    /* navigateur sans gestion des permissions */
-  }
+searchInput.addEventListener('focus', () => {
+  if (searchInput.value || proximite !== null || !positionAutorisee) return;
+  autourDeMoi();
 });
 
 /* ------------------------ installation et statistiques ------------------ */

@@ -393,3 +393,12 @@ input:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   #toast { transition: none; }
 }
+
+/* Le navigateur ajoute sa propre croix aux champs de recherche : on la masque,
+   l'application a déjà la sienne. */
+#searchInput::-webkit-search-cancel-button,
+#searchInput::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
