@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '14/09 21h';
+const VERSION = '14/09 23h';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -292,11 +292,21 @@ const ABBREVIATIONS = {
   bis: 'bis'
 };
 
-/** Texte ramené à une forme unique, abréviations développées. */
+/**
+ * Texte ramené à une forme unique : abréviations développées, et surtout
+ * suffixes de numéro harmonisés. Le référentiel officiel écrit « 10 bis »
+ * là où les fiches portent souvent « 10B » — sans cette mise en forme, ce
+ * sont deux adresses différentes.
+ */
 function searchKey(str) {
   return clean(str)
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
+    // « 10 bis » -> « 10bis », « 10 ter » -> « 10ter »
+    .replace(/\b(\d+)\s+(bis|ter|quater)\b/g, '$1$2')
+    // « 10b » -> « 10bis », « 10t » -> « 10ter »
+    .replace(/\b(\d+)b\b/g, '$1bis')
+    .replace(/\b(\d+)t\b/g, '$1ter')
     .split(' ')
     .map((w) => ABBREVIATIONS[w] || w)
     .join(' ');
@@ -1662,7 +1672,12 @@ function fichesPour(adresse) {
   return records.filter((r) => {
     const cle = searchKey(r.address);
     const mots = cle.split(' ');
-    return terms.every((t) => (/^\d+$/.test(t) ? mots.includes(t) : cle.includes(t)));
+    return terms.every((t) => {
+      if (!/^\d+$/.test(t)) return cle.includes(t);
+      // Un numéro doit correspondre à un numéro entier, éventuellement suivi
+      // d'un suffixe : « 10 » retrouve « 10bis », mais jamais « 100 ».
+      return mots.some((m) => m === t || (m.startsWith(t) && !/^\d/.test(m.slice(t.length))));
+    });
   });
 }
 
@@ -1750,6 +1765,13 @@ async function rafraichirProches(point) {
     const vus = new Set();
     for (const nom of noms) for (const fiche of fichesPour(nom)) vus.add(fiche.id);
     cacheProches = { ids: [...vus], point, ts: Date.now() };
+
+    // Si la liste des adresses proches est affichée, elle suit le déplacement
+    // au lieu de rester figée sur le point où on l'avait ouverte.
+    if (proximite !== null) {
+      proximite = cacheProches.ids;
+      renderList();
+    }
   } catch {
     /* service indisponible : on retentera au prochain point */
   }
@@ -2091,6 +2113,17 @@ document.addEventListener('visibilitychange', async () => {
   }
   if (!navigator.onLine || !getAccessKey()) return;
   prechaufferPosition();
+
+  // Retour sur l'appli après un verrouillage : on a pu changer d'immeuble
+  // entre-temps, la liste des adresses proches est donc recalculée.
+  if (proximite !== null) {
+    try {
+      const point = await obtenirPosition({ timeout: 6000 });
+      await rafraichirProches(point);
+    } catch {
+      /* position indisponible : on garde l'affichage précédent */
+    }
+  }
   if (await flushOutbox()) await loadData({ silent: true });
 });
 
