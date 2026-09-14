@@ -1336,11 +1336,20 @@ async function montrerAppareils() {
     const ligne = el('div');
     ligne.style.cssText = 'padding:12px 4px;border-bottom:1px solid #1e293b;';
 
-    const titre = el('div', null, a.nomAdmin || a.nomDeclare || a.modele || a.plateforme);
-    titre.style.cssText = 'font-size:15px;font-weight:600;color:#e2e8f0;';
+    // Sans nom, l'identifiant court : deux « android-web » ne sont pas
+    // distinguables, deux identifiants le sont toujours.
+    const estMoi = a.id === getClientId();
+    const titre = el('div', null,
+      (a.nomAdmin || a.nomDeclare || a.modele || a.court) + (estMoi ? '  ← cet appareil' : ''));
+    titre.style.cssText =
+      'font-size:15px;font-weight:600;color:' + (estMoi ? '#38bdf8' : '#e2e8f0') + ';';
 
+    const mode = a.plateforme && a.plateforme.endsWith('-app')
+      ? 'appli installée'
+      : 'ouvert dans le navigateur';
     const detail = el('div', null,
-      [a.plateforme, a.modele, a.nomDeclare ? 'se dit « ' + a.nomDeclare + ' »' : null]
+      [a.court, a.modele, 'vu la dernière fois en ' + mode,
+       a.nomDeclare ? 'se dit « ' + a.nomDeclare + ' »' : null]
         .filter(Boolean).join(' · '));
     detail.style.cssText = 'font-size:12px;color:#64748b;margin-top:2px;';
 
