@@ -1,6 +1,6 @@
 import {
   json, sanitizeText, normAddress, isValidId, clientId, toRecord, readJson,
-  rateLimit, ipBucket, archive, formatAddress, corrigerViaBAN, MAX_ADDRESS, MAX_CODE, DELETE_WINDOW_MS
+  rateLimit, ipBucket, archive, formatAddress, corrigerViaBAN, deviceNom, MAX_ADDRESS, MAX_CODE, DELETE_WINDOW_MS
 } from '../_lib.js';
 
 async function guard(context) {
@@ -159,9 +159,9 @@ export async function onRequestPatch(context) {
       .bind(row.id, row.address, row.code, row.hs, me, now, row.updated_at),
     db
       .prepare(
-        `UPDATE codes SET address = ?1, norm_address = ?2, code = ?3, hs = ?4, updated_at = ?5, groupe_id = ?6 WHERE id = ?7`
+        `UPDATE codes SET address = ?1, norm_address = ?2, code = ?3, hs = ?4, updated_at = ?5, groupe_id = ?6, maj_par = ?7 WHERE id = ?8`
       )
-      .bind(address, norm, code, hs, updatedAt, groupeId, id)
+      .bind(address, norm, code, hs, updatedAt, groupeId, me, id)
   ];
 
   for (const c of compagnes) {
@@ -175,19 +175,24 @@ export async function onRequestPatch(context) {
     );
     lot.push(
       db
-        .prepare(`UPDATE codes SET code = ?1, hs = 0, updated_at = ?2, groupe_id = ?3 WHERE id = ?4`)
-        .bind(code, now, groupeId, c.id)
+        .prepare(`UPDATE codes SET code = ?1, hs = 0, updated_at = ?2, groupe_id = ?3, maj_par = ?4 WHERE id = ?5`)
+        .bind(code, now, groupeId, me, c.id)
     );
   }
 
   await db.batch(lot);
 
+  const parQui = deviceNom(context.request);
+
   const misAJour = compagnes.map((c) =>
-    toRecord({ ...c, code, hs: 0, updated_at: now, groupe_id: groupeId }, me)
+    toRecord({ ...c, code, hs: 0, updated_at: now, groupe_id: groupeId, par_qui: parQui }, me)
   );
 
   return json({
-    record: toRecord({ ...row, address, code, hs, updated_at: updatedAt, groupe_id: groupeId }, me),
+    record: toRecord(
+      { ...row, address, code, hs, updated_at: updatedAt, groupe_id: groupeId, par_qui: parQui },
+      me
+    ),
     aussi: misAJour
   });
 }
