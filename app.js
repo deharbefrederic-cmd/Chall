@@ -1633,10 +1633,75 @@ function obtenirPosition({ timeout = 8000 } = {}) {
   });
 }
 
+/** Distance approximative entre deux points, en mètres. */
+function distanceMetres(a, b) {
+  const R = 6371000;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLon = ((b.lon - a.lon) * Math.PI) / 180;
+  const lat = ((a.lat + b.lat) / 2) * (Math.PI / 180);
+  const x = dLon * Math.cos(lat);
+  return Math.round(R * Math.sqrt(dLat * dLat + x * x));
+}
+
+// Résultat déjà calculé, prêt à être affiché sans aucune attente.
+let cacheProches = null; // { ids, point, ts }
+let pointInterroge = null;
+let surveillanceId = null;
+
+/**
+ * Recalcule la liste des fiches proches, mais seulement si on a bougé d'au
+ * moins 30 m ou si le résultat date de plus d'une minute : inutile
+ * d'interroger le service à chaque frémissement du GPS.
+ */
+async function rafraichirProches(point) {
+  const bouge = !pointInterroge || distanceMetres(pointInterroge, point) > 30;
+  const vieux = !cacheProches || Date.now() - cacheProches.ts > 60000;
+  if (!bouge && !vieux) return;
+  if (!navigator.onLine) return;
+
+  pointInterroge = point;
+  try {
+    const noms = await adressesAutour(point.lat, point.lon);
+    const vus = new Set();
+    for (const nom of noms) for (const fiche of fichesPour(nom)) vus.add(fiche.id);
+    cacheProches = { ids: [...vus], point, ts: Date.now() };
+  } catch {
+    /* service indisponible : on retentera au prochain point */
+  }
+}
+
+/**
+ * Suit la position tant que l'appli est à l'écran. C'est ce qui rend la
+ * recherche autour de soi instantanée : le GPS est déjà fixé et la liste
+ * déjà calculée quand on touche la barre de recherche. La surveillance est
+ * arrêtée dès que l'appli passe en arrière-plan, pour la batterie.
+ */
+function demarrerSurveillance() {
+  if (!positionAutorisee || surveillanceId !== null || !navigator.geolocation) return;
+  surveillanceId = navigator.geolocation.watchPosition(
+    (pos) => {
+      dernierePosition = { lat: pos.coords.latitude, lon: pos.coords.longitude, ts: Date.now() };
+      rafraichirProches(dernierePosition);
+    },
+    () => {},
+    { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }
+  );
+}
+
+function arreterSurveillance() {
+  if (surveillanceId === null) return;
+  navigator.geolocation.clearWatch(surveillanceId);
+  surveillanceId = null;
+}
+
 /** Demande la position sans rien afficher, pour l'avoir prête au besoin. */
 function prechaufferPosition() {
-  if (!positionAutorisee || positionRecente(60000)) return;
-  obtenirPosition({ timeout: 10000 }).catch(() => {});
+  if (!positionAutorisee) return;
+  demarrerSurveillance();
+  if (positionRecente(60000)) return;
+  obtenirPosition({ timeout: 10000 })
+    .then((point) => rafraichirProches(point))
+    .catch(() => {});
 }
 
 /** Adresses officielles autour d'un point, triées par distance. */
@@ -1677,6 +1742,15 @@ async function autourDeMoi() {
     return;
   }
 
+  // Résultat déjà prêt : affichage immédiat, aucune attente.
+  if (cacheProches && Date.now() - cacheProches.ts < 60000) {
+    proximite = cacheProches.ids;
+    searchInput.value = '';
+    renderList();
+    if (!proximite.length) showToast('Aucune fiche connue dans les ' + RAYON_METRES + ' m');
+    return;
+  }
+
   const connue = positionRecente();
   if (!connue) updateStatus('📍 Localisation...');
 
@@ -1700,6 +1774,8 @@ async function autourDeMoi() {
     }
 
     proximite = [...vus];
+    cacheProches = { ids: proximite, point: { lat, lon }, ts: Date.now() };
+    pointInterroge = { lat, lon };
     searchInput.value = '';
     renderList();
     updateStatus();
@@ -1835,7 +1911,11 @@ window.addEventListener('online', async () => {
 window.addEventListener('offline', () => updateStatus());
 
 document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState !== 'visible' || !navigator.onLine || !getAccessKey()) return;
+  if (document.visibilityState !== 'visible') {
+    arreterSurveillance();
+    return;
+  }
+  if (!navigator.onLine || !getAccessKey()) return;
   prechaufferPosition();
   if (await flushOutbox()) await loadData({ silent: true });
 });
