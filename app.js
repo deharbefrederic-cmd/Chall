@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '14/09 17h';
+const VERSION = '14/09 18h';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -192,10 +192,12 @@ let fenetresOuvertes = 0;
 function verrouillerFond() {
   fenetresOuvertes++;
   document.body.style.overflow = 'hidden';
+  garder();
 }
 function libererFond() {
   fenetresOuvertes = Math.max(0, fenetresOuvertes - 1);
   if (!fenetresOuvertes) document.body.style.overflow = '';
+  consommerGarde();
 }
 
 /* ------------------------------- dialogues ------------------------------ */
@@ -792,6 +794,7 @@ $('openAddModal').addEventListener('click', () => {
   hideSuggestions();
   rafraichirSignature();
   editModal.style.display = 'flex';
+  verrouillerFond();
   modalAddress.focus();
   proposerAdressesProches();
 });
@@ -823,8 +826,15 @@ async function proposerAdressesProches() {
 
 $('cancelModal').addEventListener('click', () => {
   hideSuggestions();
-  editModal.style.display = 'none';
+  fermerEdition();
 });
+
+/** Fermeture de la fenêtre d'ajout/modification, en un seul endroit. */
+function fermerEdition() {
+  if (editModal.style.display === 'none') return;
+  editModal.style.display = 'none';
+  libererFond();
+}
 
 function openEdit(id) {
   const item = records.find((r) => r.id === id);
@@ -846,6 +856,7 @@ function openEdit(id) {
   hideSuggestions();
   rafraichirSignature();
   editModal.style.display = 'flex';
+  verrouillerFond();
 }
 
 hsToggleBtn.addEventListener('click', async () => {
@@ -855,7 +866,7 @@ hsToggleBtn.addEventListener('click', async () => {
 
   isBusy = true;
   const next = !item.hs;
-  editModal.style.display = 'none';
+  fermerEdition();
 
   const res = await commit(
     { kind: 'patch', id: item.id, patch: { hs: next } },
@@ -881,7 +892,7 @@ deleteBtn.addEventListener('click', async () => {
   if (!confirmed) return;
 
   isBusy = true;
-  editModal.style.display = 'none';
+  fermerEdition();
   const res = await commit(
     { kind: 'delete', id: item.id },
     () => { records = records.filter((r) => r.id !== item.id); }
@@ -922,7 +933,7 @@ saveBtn.addEventListener('click', async () => {
         });
 
         if (shouldUpdate) {
-          editModal.style.display = 'none';
+          fermerEdition();
           const res = await commit(
             { kind: 'patch', id: similar.id, patch: { code } },
             () => { similar.code = code; similar.hs = false; similar.updatedAt = Date.now(); }
@@ -934,7 +945,7 @@ saveBtn.addEventListener('click', async () => {
 
       const id = getClientId().slice(0, 8) + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
       const now = Date.now();
-      editModal.style.display = 'none';
+      fermerEdition();
 
       const res = await commit(
         { kind: 'create', id, address, code },
@@ -966,7 +977,7 @@ saveBtn.addEventListener('click', async () => {
     if (!item) return;
 
     if (item.address === address && item.code === code) {
-      editModal.style.display = 'none';
+      fermerEdition();
       return;
     }
 
@@ -977,14 +988,14 @@ saveBtn.addEventListener('click', async () => {
     if (codeChanged) {
       const candidats = candidatsGroupe(item, ancienCode);
       if (candidats.length) {
-        editModal.style.display = 'none';
+        fermerEdition();
         const choix = await showGroupDialog(item, candidats, code);
         if (choix === null) return;
         aussi = choix;
       }
     }
 
-    editModal.style.display = 'none';
+    fermerEdition();
     const res = await commit(
       { kind: 'patch', id: item.id, patch: { address, code, aussi } },
       () => {
@@ -1104,6 +1115,7 @@ async function demanderCleAdmin() {
       localStorage.setItem(ADMIN_KEY, saisie);
       try {
         await api('/api/stats');
+        libererFond();
         modal.remove();
         resolve(true);
       } catch (err) {
@@ -1935,30 +1947,33 @@ window.addEventListener('appinstalled', async () => {
 /* --------------------------- geste de retour --------------------------- */
 
 /**
- * Le geste de retour referme d'abord ce qui est ouvert — fenêtre, filtre,
- * résultats de proximité — et ne quitte l'appli qu'ensuite.
+ * Le geste de retour referme d'abord ce qui est ouvert, et ne quitte l'appli
+ * qu'ensuite.
  *
- * On garde en permanence une entrée d'historique en réserve : le geste la
- * consomme, on agit, puis on en repose une.
+ * Point délicat : Chrome ignore les entrées d'historique créées sans geste de
+ * l'utilisateur. L'entrée doit donc être posée pendant l'appui qui ouvre la
+ * fenêtre, jamais depuis le gestionnaire de retour.
  */
 
-/**
- * Élément réellement affiché. offsetParent ne convient pas : il vaut toujours
- * null à l'intérieur d'un élément en position fixed, ce qu'est toute fenêtre.
- */
 function estAffiche(element) {
   const style = getComputedStyle(element);
   if (style.display === 'none' || style.visibility === 'hidden') return false;
   return element.getClientRects().length > 0;
 }
 
-/**
- * Repose l'entrée de réserve. Le report est indispensable : appelée
- * directement depuis le gestionnaire de retour, la demande est ignorée par le
- * navigateur, et le geste suivant quitte l'appli sans prévenir.
- */
-function poserGarde() {
-  setTimeout(() => history.pushState({ chall: true }, ''), 0);
+let retoursAIgnorer = 0;
+let fermetureParRetour = false;
+
+/** Pose une entrée de réserve. Appelé pendant le geste d'ouverture. */
+function garder() {
+  history.pushState({ chall: true }, '');
+}
+
+/** Retire l'entrée quand on referme autrement que par le geste de retour. */
+function consommerGarde() {
+  if (fermetureParRetour) return; // le geste l'a déjà consommée
+  retoursAIgnorer++;
+  history.back();
 }
 
 function fenetreOuverte() {
@@ -1969,41 +1984,39 @@ function fenetreOuverte() {
   return visibles.length ? visibles[visibles.length - 1] : null;
 }
 
-/** Referme une fenêtre via son propre bouton, pour que sa logique se déroule. */
 function refermerFenetre(modal) {
   const boutons = [...modal.querySelectorAll('button')].filter(estAffiche);
   const sortie = boutons.find((b) => /annuler|fermer|plus tard|compris/i.test(b.textContent));
   if (!sortie) return false; // pas de sortie neutre : on ne touche à rien
+  fermetureParRetour = true;
   sortie.click();
+  fermetureParRetour = false;
   return true;
 }
 
-let sortieEnCours = false;
-
 window.addEventListener('popstate', () => {
-  if (sortieEnCours) return;
-
-  const fenetre = fenetreOuverte();
-  if (fenetre && refermerFenetre(fenetre)) {
-    poserGarde();
+  // Retour provoqué par nous-mêmes en refermant une fenêtre : rien à faire.
+  if (retoursAIgnorer > 0) {
+    retoursAIgnorer--;
     return;
   }
 
+  const fenetre = fenetreOuverte();
+  if (fenetre && refermerFenetre(fenetre)) return;
+
   if (proximite !== null || searchInput.value) {
+    fermetureParRetour = true;
     quitterProximite();
     searchInput.value = '';
     searchInput.blur();
     renderList();
-    poserGarde();
+    fermetureParRetour = false;
     return;
   }
 
-  // Plus rien à refermer : on quitte réellement.
-  sortieEnCours = true;
+  // Plus rien à refermer : le geste quitte l'appli, on le laisse faire.
   history.back();
 });
-
-poserGarde();
 
 /* ------------------------------ démarrage ------------------------------- */
 
