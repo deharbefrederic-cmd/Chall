@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '14/09 15h';
+const VERSION = '14/09 16h30 — diagnostic retour';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -1932,43 +1932,17 @@ window.addEventListener('appinstalled', async () => {
   }
 });
 
-/* --------------------------- geste de retour --------------------------- */
+/* ------------------- geste de retour (version d'essai) ------------------- */
 
 /**
- * Le geste de retour d'Android referme d'abord ce qui est ouvert — fenêtre,
- * filtre, résultats de proximité — et ne quitte l'appli qu'ensuite.
- *
- * Principe : on garde en permanence une entrée d'historique en réserve. Le
- * geste la consomme, on agit, puis on en repose une. Quand il n'y a plus rien
- * à refermer, on laisse le navigateur reculer pour de bon.
+ * Version instrumentée : chaque geste affiche la décision prise. Le but est de
+ * savoir où ça casse, pas de livrer le comportement définitif.
  */
 
-/**
- * Élément réellement affiché. On ne peut pas se fier à offsetParent : il vaut
- * toujours null à l'intérieur d'un élément en position fixed, ce qui est le
- * cas de toutes les fenêtres de l'appli.
- */
 function estAffiche(element) {
   const style = getComputedStyle(element);
   if (style.display === 'none' || style.visibility === 'hidden') return false;
   return element.getClientRects().length > 0;
-}
-
-function fenetreOuverte() {
-  const visibles = [...document.querySelectorAll('.modal')].filter(
-    // L'écran de clé d'accès ne se referme pas : sans clé, il n'y a pas d'appli.
-    (m) => m.id !== 'gateModal' && estAffiche(m)
-  );
-  return visibles.length ? visibles[visibles.length - 1] : null;
-}
-
-/** Referme une fenêtre via son propre bouton, pour que sa logique se déroule. */
-function refermerFenetre(modal) {
-  const boutons = [...modal.querySelectorAll('button')].filter(estAffiche);
-  const sortie = boutons.find((b) => /annuler|fermer|plus tard|compris/i.test(b.textContent));
-  if (!sortie) return false; // pas de sortie neutre : on ne touche à rien
-  sortie.click();
-  return true;
 }
 
 function poserGarde() {
@@ -1978,17 +1952,32 @@ function poserGarde() {
 let sortieEnCours = false;
 
 window.addEventListener('popstate', () => {
-  // Le history.back() de sortie déclenche lui-même un popstate : sans ce
-  // verrou, on pourrait boucler au lieu de quitter.
-  if (sortieEnCours) return;
+  if (sortieEnCours) {
+    showToast('↩ déjà en sortie');
+    return;
+  }
 
-  const fenetre = fenetreOuverte();
-  if (fenetre && refermerFenetre(fenetre)) {
+  const toutes = [...document.querySelectorAll('.modal')];
+  const visibles = toutes.filter((m) => m.id !== 'gateModal' && estAffiche(m));
+  const fenetre = visibles.length ? visibles[visibles.length - 1] : null;
+
+  if (fenetre) {
+    const boutons = [...fenetre.querySelectorAll('button')].filter(estAffiche);
+    const sortie = boutons.find((b) => /annuler|fermer|plus tard|compris/i.test(b.textContent));
+
+    if (sortie) {
+      showToast('↩ ' + visibles.length + ' fenêtre · clic « ' + sortie.textContent.trim() + ' »');
+      sortie.click();
+      poserGarde();
+      return;
+    }
+    showToast('↩ ' + visibles.length + ' fenêtre · ' + boutons.length + ' boutons · aucune sortie');
     poserGarde();
     return;
   }
 
   if (proximite !== null || searchInput.value) {
+    showToast('↩ filtre annulé');
     quitterProximite();
     searchInput.value = '';
     searchInput.blur();
@@ -1997,12 +1986,14 @@ window.addEventListener('popstate', () => {
     return;
   }
 
-  // Plus rien à refermer : on quitte réellement.
+  showToast('↩ ' + toutes.length + ' modales, 0 visible · sortie · hist=' + history.length);
   sortieEnCours = true;
-  history.back();
+  // Délai volontaire : sans lui, l'appli se ferme avant que le message soit lu.
+  setTimeout(() => history.back(), 1600);
 });
 
 poserGarde();
+showToast('↩ garde posée · hist=' + history.length);
 
 /* ------------------------------ démarrage ------------------------------- */
 
