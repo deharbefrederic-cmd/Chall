@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '14/09 19h30';
+const VERSION = '14/09 20h';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -197,7 +197,6 @@ function verrouillerFond() {
 function libererFond() {
   fenetresOuvertes = Math.max(0, fenetresOuvertes - 1);
   if (!fenetresOuvertes) document.body.style.overflow = '';
-  consommerGarde();
 }
 
 /* ------------------------------- dialogues ------------------------------ */
@@ -2002,19 +2001,16 @@ function estAffiche(element) {
   return element.getClientRects().length > 0;
 }
 
-let retoursAIgnorer = 0;
-let fermetureParRetour = false;
-
-/** Pose une entrée de réserve. Appelé pendant le geste d'ouverture. */
+/**
+ * Pose une entrée de réserve, pendant le geste qui ouvre la fenêtre.
+ *
+ * On ne retire jamais d'entrée à la fermeture : retirer et reposer presque
+ * simultanément — ce qui arrive quand une fenêtre s'en ouvre une autre — se
+ * neutralisait, et il ne restait plus rien pour absorber le geste suivant.
+ * Les entrées inutilisées sont simplement déroulées au moment de sortir.
+ */
 function garder() {
   history.pushState({ chall: true }, '');
-}
-
-/** Retire l'entrée quand on referme autrement que par le geste de retour. */
-function consommerGarde() {
-  if (fermetureParRetour) return; // le geste l'a déjà consommée
-  retoursAIgnorer++;
-  history.back();
 }
 
 function fenetreOuverte() {
@@ -2029,34 +2025,32 @@ function refermerFenetre(modal) {
   const boutons = [...modal.querySelectorAll('button')].filter(estAffiche);
   const sortie = boutons.find((b) => /annuler|fermer|plus tard|compris/i.test(b.textContent));
   if (!sortie) return false; // pas de sortie neutre : on ne touche à rien
-  fermetureParRetour = true;
   sortie.click();
-  fermetureParRetour = false;
   return true;
 }
 
+// Nombre d'entrées inutilisées déroulées d'affilée, pour ne pas boucler.
+let deroulement = 0;
+
 window.addEventListener('popstate', () => {
-  // Retour provoqué par nous-mêmes en refermant une fenêtre : rien à faire.
-  if (retoursAIgnorer > 0) {
-    retoursAIgnorer--;
+  const fenetre = fenetreOuverte();
+  if (fenetre && refermerFenetre(fenetre)) {
+    deroulement = 0;
     return;
   }
 
-  const fenetre = fenetreOuverte();
-  if (fenetre && refermerFenetre(fenetre)) return;
-
   if (proximite !== null || searchInput.value) {
-    fermetureParRetour = true;
     quitterProximite();
     searchInput.value = '';
     searchInput.blur();
     renderList();
-    fermetureParRetour = false;
+    deroulement = 0;
     return;
   }
 
-  // Plus rien à refermer : le geste quitte l'appli, on le laisse faire.
-  history.back();
+  // Plus rien à refermer. On déroule les entrées laissées par les fenêtres
+  // déjà refermées à la main, jusqu'à sortir pour de bon.
+  if (deroulement++ < 12) history.back();
 });
 
 /* ------------------------------ démarrage ------------------------------- */
