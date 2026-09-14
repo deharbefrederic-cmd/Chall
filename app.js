@@ -418,10 +418,17 @@ function buildCard(item) {
   return card;
 }
 
+function majBoutonEffacer() {
+  // Rien à effacer quand le champ est vide : le bouton disparaît.
+  clearBtn.style.display = searchInput.value ? '' : 'none';
+}
+
 function renderList() {
+  majBoutonEffacer();
   const terms = searchKey(searchInput.value).split(' ').filter(Boolean);
 
   let filtered = records.filter((item) => {
+    if (proximite && !proximite.includes(item.id)) return false;
     if (filterRecentOnly && !item.updatedAt) return false;
     if (!terms.length) return true;
     // Adresse seule (chercher « 69 » ne doit pas remonter les codes),
@@ -430,13 +437,20 @@ function renderList() {
     return terms.every((t) => target.includes(t));
   });
 
-  filtered.sort((x, y) =>
-    filterRecentOnly
-      ? (y.updatedAt || 0) - (x.updatedAt || 0)
-      : (x.address || '').localeCompare(y.address || '', 'fr', { numeric: true, sensitivity: 'base' })
-  );
+  if (proximite) {
+    // Ordre de distance renvoyé par le service, du plus proche au plus loin.
+    filtered.sort((x, y) => proximite.indexOf(x.id) - proximite.indexOf(y.id));
+  } else {
+    filtered.sort((x, y) =>
+      filterRecentOnly
+        ? (y.updatedAt || 0) - (x.updatedAt || 0)
+        : (x.address || '').localeCompare(y.address || '', 'fr', { numeric: true, sensitivity: 'base' })
+    );
+  }
 
-  itemCount.textContent = `${filtered.length} résultat${filtered.length > 1 ? 's' : ''}`;
+  itemCount.textContent = proximite
+    ? `📍 ${filtered.length} autour de vous`
+    : `${filtered.length} résultat${filtered.length > 1 ? 's' : ''}`;
 
   const fragment = document.createDocumentFragment();
   if (!filtered.length) {
@@ -1523,11 +1537,13 @@ async function checkAdminCommand(value) {
 }
 
 searchInput.addEventListener('input', (e) => {
+  if (e.target.value) quitterProximite();
   checkAdminCommand(e.target.value);
   renderList();
 });
 
 clearBtn.addEventListener('click', () => {
+  quitterProximite();
   searchInput.value = '';
   searchInput.focus();
   renderList();
@@ -1538,6 +1554,116 @@ filterRecentBtn.addEventListener('click', () => {
   filterRecentBtn.classList.toggle('active', filterRecentOnly);
   filterRecentBtn.setAttribute('aria-pressed', String(filterRecentOnly));
   renderList();
+});
+
+/* --------------------------- autour de moi --------------------------- */
+
+const RAYON_METRES = 150;
+
+// Identifiants des fiches proches, dans l'ordre de distance. null = inactif.
+let proximite = null;
+
+/**
+ * Correspondance stricte entre une adresse officielle et une fiche : un
+ * numéro doit correspondre à un numéro entier, sinon « 7 » trouve le 17.
+ */
+function fichesPour(adresse) {
+  const terms = searchKey(adresse).split(' ').filter(Boolean);
+  if (!terms.length) return [];
+  return records.filter((r) => {
+    const cle = searchKey(r.address);
+    const mots = cle.split(' ');
+    return terms.every((t) => (/^\d+$/.test(t) ? mots.includes(t) : cle.includes(t)));
+  });
+}
+
+function quitterProximite() {
+  if (proximite === null) return;
+  proximite = null;
+  renderList();
+}
+
+async function autourDeMoi() {
+  if (!navigator.geolocation) {
+    showToast('Position indisponible sur cet appareil');
+    return;
+  }
+  if (!navigator.onLine) {
+    showToast('Hors ligne — position impossible');
+    return;
+  }
+
+  updateStatus('📍 Localisation...');
+
+  let position;
+  try {
+    position = await new Promise((ok, ko) =>
+      navigator.geolocation.getCurrentPosition(ok, ko, {
+        enableHighAccuracy: true,
+        timeout: 8000,
+        maximumAge: 30000
+      })
+    );
+  } catch {
+    updateStatus();
+    showToast('Position refusée ou indisponible');
+    return;
+  }
+
+  const { latitude: lat, longitude: lon } = position.coords;
+  const cercle = JSON.stringify({ type: 'Circle', coordinates: [lon, lat], radius: RAYON_METRES });
+  const url =
+    'https://data.geopf.fr/geocodage/reverse?index=address&limit=30' +
+    '&lon=' + lon + '&lat=' + lat +
+    '&searchgeom=' + encodeURIComponent(cercle);
+
+  try {
+    // Service tiers : aucun en-tête de l'application n'y est joint, et la
+    // position ne quitte pas cet appel — rien n'est envoyé à ton serveur.
+    const res = await fetch(url);
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+
+    // Les résultats arrivent triés par distance : on conserve cet ordre.
+    const vus = new Set();
+    for (const feature of data.features || []) {
+      const nom = (feature.properties || {}).name;
+      if (!nom) continue;
+      for (const fiche of fichesPour(nom)) vus.add(fiche.id);
+    }
+
+    proximite = [...vus];
+    searchInput.value = '';
+    renderList();
+    updateStatus();
+
+    if (!proximite.length) {
+      showToast('Aucune fiche connue dans les ' + RAYON_METRES + ' m');
+    }
+  } catch {
+    updateStatus();
+    showToast('Service d’adresses injoignable');
+  }
+}
+
+// Bouton dans la barre d'état, à gauche du filtre Récents.
+const btnProximite = el('button', 'btn-toggle-recent', '📍 Autour de moi');
+btnProximite.type = 'button';
+btnProximite.addEventListener('click', autourDeMoi);
+filterRecentBtn.insertAdjacentElement('beforebegin', btnProximite);
+
+// Déclenchement automatique à l'ouverture de la recherche, mais seulement si
+// l'autorisation est déjà accordée : pas de demande de position surgissant
+// dès qu'on touche le champ.
+searchInput.addEventListener('focus', async () => {
+  if (searchInput.value || proximite !== null) return;
+  if (!navigator.permissions) return;
+  try {
+    const etat = await navigator.permissions.query({ name: 'geolocation' });
+    if (etat.state === 'granted') autourDeMoi();
+  } catch {
+    /* navigateur sans gestion des permissions */
+  }
 });
 
 /* ------------------------ installation et statistiques ------------------ */
