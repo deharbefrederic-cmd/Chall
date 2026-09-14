@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '14/09 20h';
+const VERSION = '14/09 21h';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -1622,12 +1622,16 @@ async function checkAdminCommand(value) {
 }
 
 searchInput.addEventListener('input', (e) => {
-  if (e.target.value) quitterProximite();
+  if (e.target.value) {
+    garderFiltre();
+    quitterProximite();
+  }
   checkAdminCommand(e.target.value);
   renderList();
 });
 
 clearBtn.addEventListener('click', () => {
+  gardeFiltre = false;
   quitterProximite();
   searchInput.value = '';
   searchInput.focus();
@@ -1875,7 +1879,10 @@ async function autourDeMoi() {
 // déclenche seule la localisation et le bouton disparaît.
 const btnProximite = el('button', 'btn-toggle-recent', '📍 Autour de moi');
 btnProximite.type = 'button';
-btnProximite.addEventListener('click', autourDeMoi);
+btnProximite.addEventListener('click', () => {
+  garderFiltre();
+  autourDeMoi();
+});
 btnProximite.style.display = 'none';
 filterRecentBtn.insertAdjacentElement('beforebegin', btnProximite);
 
@@ -1906,8 +1913,14 @@ function majBoutonProximite(etat) {
 // dès qu'on touche le champ.
 searchInput.addEventListener('focus', () => {
   if (searchInput.value || proximite !== null) return;
-  if (positionAutorisee) autourDeMoi();
-  else btnProximite.style.display = '';
+  if (positionAutorisee) {
+    // Posée ici, dans le geste : une entrée créée après l'attente du GPS
+    // serait ignorée par le navigateur.
+    garderFiltre();
+    autourDeMoi();
+  } else {
+    btnProximite.style.display = '';
+  }
 });
 
 searchInput.addEventListener('blur', () => {
@@ -2013,6 +2026,16 @@ function garder() {
   history.pushState({ chall: true }, '');
 }
 
+// Un filtre actif — recherche ou proximité — doit lui aussi pouvoir absorber
+// un geste de retour. Une seule entrée suffit pour tout l'état filtré.
+let gardeFiltre = false;
+
+function garderFiltre() {
+  if (gardeFiltre) return;
+  gardeFiltre = true;
+  garder();
+}
+
 function fenetreOuverte() {
   const visibles = [...document.querySelectorAll('.modal')].filter(
     // L'écran de clé d'accès ne se referme pas : sans clé, il n'y a pas d'appli.
@@ -2044,6 +2067,7 @@ window.addEventListener('popstate', () => {
     searchInput.value = '';
     searchInput.blur();
     renderList();
+    gardeFiltre = false;
     deroulement = 0;
     return;
   }
