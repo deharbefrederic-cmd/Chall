@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '14/09 19h';
+const VERSION = '14/09 19h30';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -757,28 +757,42 @@ function showGroupDialog(item, candidats, nouveauCode) {
 
     box.appendChild(liste);
 
-    const barre = el('div', 'modal-btns');
-    barre.style.cssText = 'justify-content:flex-end;gap:10px;';
-    const seule = el('button', 'btn-cancel', 'Celle-ci seule');
-    seule.type = 'button';
-    const valider = el('button', 'btn-save', 'Valider');
-    valider.type = 'button';
-    barre.append(seule, valider);
-    box.appendChild(barre);
-
-    modal.appendChild(box);
-    document.body.appendChild(modal);
-    verrouillerFond();
-
     const fermer = (valeur) => {
       libererFond();
       modal.remove();
       resolve(valeur);
     };
-    seule.addEventListener('click', () => fermer([]));
+
+    const barre = el('div');
+    barre.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px;';
+
+    const bouton = (classe, texte, valeur, large) => {
+      const b = el('button', classe, texte);
+      b.type = 'button';
+      b.style.cssText = 'width:100%;padding:12px 8px;font-size:15px;' + (large ? 'grid-column:1 / -1;' : '');
+      b.addEventListener('click', () => fermer(valeur));
+      barre.appendChild(b);
+      return b;
+    };
+
+    bouton('btn-cancel', 'Celle-ci seule', []);
+    const valider = el('button', 'btn-save', 'Valider');
+    valider.type = 'button';
+    valider.style.cssText = 'width:100%;padding:12px 8px;font-size:15px;';
+    // Les cases sont lues au moment du clic, pas à la construction de la fenêtre.
     valider.addEventListener('click', () =>
       fermer(cases.filter((c) => c.coche.checked).map((c) => c.id))
     );
+    barre.appendChild(valider);
+    // Sortie neutre : sans elle, le geste de retour n'avait rien à actionner
+    // et la fenêtre restait ouverte sans explication.
+    bouton('btn-cancel', 'Annuler', null, true);
+
+    box.appendChild(barre);
+
+    modal.appendChild(box);
+    document.body.appendChild(modal);
+    verrouillerFond();
   });
 }
 
