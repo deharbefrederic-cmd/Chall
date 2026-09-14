@@ -34,8 +34,15 @@ export async function onRequestGet(context) {
       .all(),
     db
       .prepare(
-        `SELECT jour, COUNT(*) AS appareils, SUM(ouvertures) AS ouvertures
-         FROM visites WHERE jour >= ?1 GROUP BY jour ORDER BY jour DESC`
+        `SELECT v.jour,
+                COUNT(*) AS appareils,
+                SUM(v.ouvertures) AS ouvertures,
+                GROUP_CONCAT(COALESCE(d.nom_admin, d.nom_declare, d.model, d.platform), ', ') AS qui
+         FROM visites v
+         LEFT JOIN devices d ON d.client_id = v.client_id
+         WHERE v.jour >= ?1
+         GROUP BY v.jour
+         ORDER BY v.jour DESC`
       )
       .bind(depuis)
       .all(),
@@ -60,7 +67,8 @@ export async function onRequestGet(context) {
     journal: (journal.results || []).map((r) => ({
       jour: r.jour,
       appareils: r.appareils,
-      ouvertures: r.ouvertures
+      ouvertures: r.ouvertures,
+      qui: r.qui
     })),
     refus: (refus.results || []).map((r) => ({ jour: r.jour, n: r.cle_invalide }))
   });

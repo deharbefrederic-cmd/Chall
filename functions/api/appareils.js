@@ -52,3 +52,26 @@ export async function onRequestPatch(context) {
 
   return json({ ok: true });
 }
+
+/**
+ * Supprime la fiche d'un appareil. Sert à effacer les doublons créés par un
+ * vidage de cache ou un onglet privé. L'historique des modifications n'est
+ * pas touché : seule l'étiquette disparaît.
+ */
+export async function onRequestDelete(context) {
+  if (!estAdmin(context.request, context.env)) {
+    return json({ error: 'forbidden', message: "Réservé à l'administrateur." }, 403);
+  }
+
+  const body = await readJson(context.request);
+  if (!body || typeof body.id !== 'string') {
+    return json({ error: 'bad_request', message: 'Requête incomplète.' }, 400);
+  }
+
+  await context.env.DB.batch([
+    context.env.DB.prepare('DELETE FROM devices WHERE client_id = ?1').bind(body.id),
+    context.env.DB.prepare('DELETE FROM visites WHERE client_id = ?1').bind(body.id)
+  ]);
+
+  return json({ ok: true });
+}
