@@ -10,9 +10,11 @@ export async function onRequestGet(context) {
     .prepare(
       `SELECT h.id, h.archived_at, h.action,
               h.address AS ancienne_adresse, h.code AS ancien_code,
-              c.address AS adresse, c.code AS code
+              c.address AS adresse, c.code AS code,
+              COALESCE(d.nom_admin, d.nom_declare, d.model, d.platform) AS auteur
        FROM codes_history h
        LEFT JOIN codes c ON c.id = h.id
+       LEFT JOIN devices d ON d.client_id = h.actor
        ORDER BY h.seq DESC
        LIMIT 20`
     )
@@ -28,7 +30,8 @@ export async function onRequestGet(context) {
       ancienCode: r.ancien_code,
       // État actuel de la fiche, si elle existe encore.
       adresse: r.adresse,
-      code: r.code
+      code: r.code,
+      auteur: r.auteur
     }))
   });
 }

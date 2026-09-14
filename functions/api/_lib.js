@@ -127,17 +127,41 @@ export function devicePlatform(request) {
   return os + '-' + mode;
 }
 
+/**
+ * Modèle de l'appareil, quand le navigateur veut bien le donner.
+ * Chrome a figé le modèle dans l'identification classique depuis 2023 : il
+ * n'arrive que via Sec-CH-UA-Model, et seulement après que le serveur l'ait
+ * demandé. Safari ne le fournit jamais — sur iPhone on n'aura rien.
+ */
+export function deviceModel(request) {
+  const brut = request.headers.get('Sec-CH-UA-Model') || '';
+  const modele = brut.replace(/^"|"$/g, '').trim();
+  if (!modele || modele === 'K') return null; // « K » est la valeur bidon d'Android
+  return modele.slice(0, 60);
+}
+
+/** Prénom facultatif déclaré par le livreur. */
+export function deviceNom(request) {
+  const brut = sanitizeText(request.headers.get('X-Chall-Nom') || '', 30);
+  return brut || null;
+}
+
 /** Marque l'appareil comme vu. Une ligne par appareil, jamais de doublon. */
-export async function touchDevice(db, id, platform) {
+export async function touchDevice(db, id, platform, model, nom) {
   if (!id) return;
   const now = Date.now();
   await db
     .prepare(
-      `INSERT INTO devices (client_id, platform, first_seen, last_seen)
-       VALUES (?1, ?2, ?3, ?3)
-       ON CONFLICT(client_id) DO UPDATE SET last_seen = ?3, platform = ?2`
+      `INSERT INTO devices (client_id, platform, model, nom_declare, first_seen, last_seen)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+       ON CONFLICT(client_id) DO UPDATE SET
+         last_seen = ?5,
+         platform = ?2,
+         -- On ne remplace jamais une valeur connue par du vide.
+         model = COALESCE(?3, devices.model),
+         nom_declare = COALESCE(?4, devices.nom_declare)`
     )
-    .bind(id, platform, now)
+    .bind(id, platform, model, nom, now)
     .run();
 }
 

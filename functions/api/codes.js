@@ -1,6 +1,6 @@
 import {
   json, sanitizeText, normAddress, isValidId, clientId, toRecord, readJson,
-  rateLimit, ipBucket, devicePlatform, touchDevice, formatAddress, corrigerViaBAN, noterVisite, MAX_ADDRESS, MAX_CODE
+  rateLimit, ipBucket, devicePlatform, deviceModel, deviceNom, touchDevice, formatAddress, corrigerViaBAN, noterVisite, MAX_ADDRESS, MAX_CODE
 } from './_lib.js';
 
 export async function onRequestGet(context) {
@@ -16,7 +16,7 @@ export async function onRequestGet(context) {
     .all();
 
   // Présence de l'appareil : utilisateurs actifs et journal quotidien.
-  await touchDevice(db, me, devicePlatform(context.request));
+  await touchDevice(db, me, devicePlatform(context.request), deviceModel(context.request), deviceNom(context.request));
   context.waitUntil(noterVisite(db, me));
 
   return json({ records: (results || []).map((row) => toRecord(row, me)) });

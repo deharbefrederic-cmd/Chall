@@ -37,6 +37,9 @@ export async function onRequest(context) {
   // l'ajouter sans préflight CORS, qu'on n'autorise jamais. Pas de CSRF possible.
   const response = await next();
   response.headers.set('X-Content-Type-Options', 'nosniff');
+  // Demande au navigateur de joindre le modèle aux requêtes suivantes.
+  // Silencieux côté utilisateur : aucune fenêtre d'autorisation.
+  response.headers.set('Accept-CH', 'Sec-CH-UA-Model, Sec-CH-UA-Platform-Version');
   response.headers.set('Referrer-Policy', 'no-referrer');
   return response;
 }
