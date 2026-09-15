@@ -8,7 +8,7 @@ export async function onRequestGet(context) {
 
   const { results } = await context.env.DB
     .prepare(
-      `SELECT d.client_id, d.platform, d.model, d.nom_declare, d.nom_admin,
+      `SELECT d.client_id, d.platform, d.model, d.nom_declare, d.nom_admin, d.geoloc,
               d.first_seen, d.last_seen,
               (SELECT COUNT(*) FROM codes_history h WHERE h.actor = d.client_id) AS modifications
        FROM devices d
@@ -23,6 +23,7 @@ export async function onRequestGet(context) {
       court: r.client_id.slice(0, 8),
       plateforme: r.platform,
       modele: r.model,
+      geoloc: r.geoloc,
       nomDeclare: r.nom_declare,
       nomAdmin: r.nom_admin,
       premiereFois: r.first_seen,

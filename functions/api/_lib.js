@@ -150,21 +150,22 @@ export function deviceNom(request) {
 }
 
 /** Marque l'appareil comme vu. Une ligne par appareil, jamais de doublon. */
-export async function touchDevice(db, id, platform, model, nom) {
+export async function touchDevice(db, id, platform, model, nom, geoloc) {
   if (!id) return;
   const now = Date.now();
   await db
     .prepare(
-      `INSERT INTO devices (client_id, platform, model, nom_declare, first_seen, last_seen)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+      `INSERT INTO devices (client_id, platform, model, nom_declare, geoloc, first_seen, last_seen)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
        ON CONFLICT(client_id) DO UPDATE SET
-         last_seen = ?5,
+         last_seen = ?6,
          platform = ?2,
          -- On ne remplace jamais une valeur connue par du vide.
          model = COALESCE(?3, devices.model),
-         nom_declare = COALESCE(?4, devices.nom_declare)`
+         nom_declare = COALESCE(?4, devices.nom_declare),
+         geoloc = COALESCE(?5, devices.geoloc)`
     )
-    .bind(id, platform, model, nom, now)
+    .bind(id, platform, model, nom, geoloc, now)
     .run();
 }
 
@@ -375,4 +376,13 @@ export function estAdmin(request, env) {
   const attendue = env.CHALL_ADMIN_KEY;
   if (!attendue) return false;
   return egaliteConstante(request.headers.get('X-Chall-Admin') || '', attendue);
+}
+
+/**
+ * État de l'autorisation de position déclaré par le navigateur.
+ * « prompt » ne veut pas dire refus : c'est qu'elle n'a jamais été demandée.
+ */
+export function deviceGeo(request) {
+  const valeur = (request.headers.get('X-Chall-Geo') || '').toLowerCase();
+  return ['granted', 'denied', 'prompt'].includes(valeur) ? valeur : null;
 }
