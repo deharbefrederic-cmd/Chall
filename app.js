@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '15/09 — guide 2';
+const VERSION = '15/09 — position';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -135,6 +135,7 @@ async function api(path, options = {}) {
     'X-Chall-Mode': standalone ? 'app' : 'web',
     ...(localStorage.getItem(ADMIN_KEY) ? { 'X-Chall-Admin': localStorage.getItem(ADMIN_KEY) } : {}),
     ...(localStorage.getItem(NOM_KEY) ? { 'X-Chall-Nom': localStorage.getItem(NOM_KEY) } : {}),
+    ...(etatPosition ? { 'X-Chall-Geo': etatPosition } : {}),
     ...(options.body ? { 'Content-Type': 'application/json' } : {})
   };
 
@@ -1435,8 +1436,14 @@ async function montrerAppareils() {
     const mode = a.plateforme && a.plateforme.endsWith('-app')
       ? 'appli installée'
       : 'ouvert dans le navigateur';
+    const position =
+      a.geoloc === 'granted' ? '📍 position autorisée'
+      : a.geoloc === 'denied' ? '🚫 position refusée'
+      : a.geoloc === 'prompt' ? '❔ position jamais demandée'
+      : null;
+
     const detail = el('div', null,
-      [a.court, a.modele, 'vu la dernière fois en ' + mode,
+      [a.court, a.modele, 'vu la dernière fois en ' + mode, position,
        a.nomDeclare ? 'se dit « ' + a.nomDeclare + ' »' : null]
         .filter(Boolean).join(' · '));
     detail.style.cssText = 'font-size:12px;color:#64748b;margin-top:2px;';
@@ -1919,8 +1926,10 @@ btnProximite.style.display = 'none';
 filterRecentBtn.insertAdjacentElement('beforebegin', btnProximite);
 
 let positionAutorisee = false;
+let etatPosition = null; // 'granted' | 'denied' | 'prompt'
 
 function majBoutonProximite(etat) {
+  etatPosition = etat;
   positionAutorisee = etat === 'granted';
   // Le bouton ne sert qu'à accorder l'autorisation. Il n'apparaît donc que
   // pendant la saisie, et disparaît définitivement une fois accordée.
