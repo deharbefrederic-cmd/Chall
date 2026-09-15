@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '15/09 — guide';
+const VERSION = '15/09 — guide 2';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -2127,7 +2127,7 @@ const ETAPES_TUTO = [
     titre: '✏️ Corriger un code',
     texte:
       "Appui long sur le crayon, une seconde. Un appui bref ne fait rien : c'est voulu, "
-      + "pour ne pas ouvrir une fiche par erreur. C'est aussi là qu'on signale un portail HS."
+      + "pour ne pas ouvrir une fiche par erreur. C'est aussi là qu'on signale un code HS."
   },
   {
     cible: () => $('openAddModal'),
@@ -2137,11 +2137,13 @@ const ETAPES_TUTO = [
       + "automatiquement, vous n'avez que le code à saisir."
   },
   {
-    cible: () => document.querySelector('.card .badge-recent') || document.querySelector('.card'),
+    // Le bouton est toujours présent, contrairement au badge MAJ qui n'existe
+    // que si une fiche a changé récemment.
+    cible: () => filterRecentBtn,
     titre: '🔄 Les codes récents',
     texte:
       "Un badge MAJ signale un code changé dans les sept derniers jours. "
-      + "« Récents » n'affiche que ceux-là."
+      + "Ce bouton n'affiche que ceux-là."
   }
 ];
 
@@ -2198,26 +2200,34 @@ function lancerTuto() {
     }
 
     const r = cible.getBoundingClientRect();
+    if (!r.width && !r.height) {
+      terminer(); // cible disparue de l'écran
+      return;
+    }
+
     const marge = 8;
     trou.style.top = r.top - marge + 'px';
     trou.style.left = r.left - marge + 'px';
     trou.style.width = r.width + marge * 2 + 'px';
     trou.style.height = r.height + marge * 2 + 'px';
 
-    // La bulle se place du côté où il y a de la place.
-    const dessous = r.bottom + 20;
-    if (dessous + 190 < window.innerHeight) {
-      bulle.style.top = dessous + 'px';
-      bulle.style.bottom = '';
-    } else {
-      bulle.style.bottom = window.innerHeight - r.top + 20 + 'px';
-      bulle.style.top = '';
-    }
-
+    // Le texte d'abord : la hauteur réelle de la bulle est nécessaire pour la
+    // placer, faute de quoi elle peut se retrouver hors de l'écran.
     titre.textContent = etape.titre;
     texte.textContent = etape.texte;
     compteur.textContent = index + 1 + ' / ' + etapes.length;
     suivant.textContent = index === etapes.length - 1 ? 'Compris' : 'Suivant';
+
+    bulle.style.bottom = '';
+    bulle.style.top = '0px';
+    const hauteur = bulle.offsetHeight;
+    const dessous = r.bottom + 20;
+    const dessus = r.top - 20 - hauteur;
+
+    let haut = dessous + hauteur + 12 <= window.innerHeight ? dessous : dessus;
+    // Bornage : la bulle reste entièrement visible quoi qu'il arrive.
+    haut = Math.max(12, Math.min(haut, window.innerHeight - hauteur - 12));
+    bulle.style.top = haut + 'px';
   };
 
   passer.addEventListener('click', terminer);
