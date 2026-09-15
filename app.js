@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '14/09 23h';
+const VERSION = '15/09 — guide';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -1625,7 +1625,17 @@ async function partagerLien() {
 })();
 
 async function checkAdminCommand(value) {
-  if (value.trim().toLowerCase() !== '#admin') return;
+  const commande = value.trim().toLowerCase();
+
+  if (commande === '#aide') {
+    searchInput.value = '';
+    searchInput.blur();
+    renderList();
+    lancerTuto();
+    return;
+  }
+
+  if (commande !== '#admin') return;
   searchInput.value = '';
   renderList();
   await ouvrirAdmin();
@@ -2099,6 +2109,135 @@ window.addEventListener('popstate', () => {
   if (deroulement++ < 12) history.back();
 });
 
+/* ------------------------------- guide ---------------------------------- */
+
+const TUTO_KEY = 'chall_tuto_v1';
+
+// Uniquement ce qui ne se devine pas. Le reste s'apprend en utilisant.
+const ETAPES_TUTO = [
+  {
+    cible: () => searchInput,
+    titre: '📍 Les immeubles autour de vous',
+    texte:
+      "Touchez simplement la barre de recherche : les adresses situées à moins de 80 m "
+      + "s'affichent en premier, la plus proche en tête. Rien à taper."
+  },
+  {
+    cible: () => document.querySelector('.card .btn-action'),
+    titre: '✏️ Corriger un code',
+    texte:
+      "Appui long sur le crayon, une seconde. Un appui bref ne fait rien : c'est voulu, "
+      + "pour ne pas ouvrir une fiche par erreur. C'est aussi là qu'on signale un portail HS."
+  },
+  {
+    cible: () => $('openAddModal'),
+    titre: '➕ Ajouter un immeuble',
+    texte:
+      "Si un code manque, ajoutez-le. Devant l'immeuble, l'adresse vous est proposée "
+      + "automatiquement, vous n'avez que le code à saisir."
+  },
+  {
+    cible: () => document.querySelector('.card .badge-recent') || document.querySelector('.card'),
+    titre: '🔄 Les codes récents',
+    texte:
+      "Un badge MAJ signale un code changé dans les sept derniers jours. "
+      + "« Récents » n'affiche que ceux-là."
+  }
+];
+
+function lancerTuto() {
+  const etapes = ETAPES_TUTO.filter((e) => e.cible());
+  if (!etapes.length) return;
+
+  let index = 0;
+
+  const couche = el('div', 'modal');
+  couche.style.cssText =
+    'display:block;background:transparent;padding:0;position:fixed;inset:0;z-index:60;';
+
+  const trou = el('div');
+  trou.style.cssText =
+    'position:absolute;border-radius:12px;box-shadow:0 0 0 9999px rgba(0,0,0,0.78);' +
+    'border:2px solid #38bdf8;transition:all 180ms;pointer-events:none;';
+
+  const bulle = el('div');
+  bulle.style.cssText =
+    'position:absolute;left:16px;right:16px;background:#1e293b;border-radius:14px;' +
+    'padding:16px;box-shadow:0 10px 30px rgba(0,0,0,0.5);';
+
+  const titre = el('h3', null, '');
+  titre.style.cssText = 'font-size:16px;margin-bottom:8px;color:#e2e8f0;';
+  const texte = el('p', null, '');
+  texte.style.cssText = 'font-size:14px;line-height:1.5;color:#cbd5e1;margin-bottom:14px;';
+
+  const barre = el('div');
+  barre.style.cssText = 'display:flex;gap:10px;justify-content:flex-end;align-items:center;';
+  const compteur = el('span', null, '');
+  compteur.style.cssText = 'margin-right:auto;font-size:12px;color:#64748b;';
+  const passer = el('button', 'btn-cancel', 'Fermer le guide');
+  passer.type = 'button';
+  const suivant = el('button', 'btn-save', 'Suivant');
+  suivant.type = 'button';
+  barre.append(compteur, passer, suivant);
+
+  bulle.append(titre, texte, barre);
+  couche.append(trou, bulle);
+
+  const terminer = () => {
+    localStorage.setItem(TUTO_KEY, 'vu');
+    libererFond();
+    couche.remove();
+  };
+
+  const afficher = () => {
+    const etape = etapes[index];
+    const cible = etape.cible();
+    if (!cible) {
+      terminer();
+      return;
+    }
+
+    const r = cible.getBoundingClientRect();
+    const marge = 8;
+    trou.style.top = r.top - marge + 'px';
+    trou.style.left = r.left - marge + 'px';
+    trou.style.width = r.width + marge * 2 + 'px';
+    trou.style.height = r.height + marge * 2 + 'px';
+
+    // La bulle se place du côté où il y a de la place.
+    const dessous = r.bottom + 20;
+    if (dessous + 190 < window.innerHeight) {
+      bulle.style.top = dessous + 'px';
+      bulle.style.bottom = '';
+    } else {
+      bulle.style.bottom = window.innerHeight - r.top + 20 + 'px';
+      bulle.style.top = '';
+    }
+
+    titre.textContent = etape.titre;
+    texte.textContent = etape.texte;
+    compteur.textContent = index + 1 + ' / ' + etapes.length;
+    suivant.textContent = index === etapes.length - 1 ? 'Compris' : 'Suivant';
+  };
+
+  passer.addEventListener('click', terminer);
+  suivant.addEventListener('click', () => {
+    index++;
+    if (index >= etapes.length) terminer();
+    else afficher();
+  });
+
+  document.body.appendChild(couche);
+  verrouillerFond();
+  afficher();
+}
+
+/** Première ouverture : on montre le guide une fois la liste affichée. */
+function proposerTuto() {
+  if (localStorage.getItem(TUTO_KEY) || !records.length) return;
+  setTimeout(lancerTuto, 600);
+}
+
 /* ------------------------------ démarrage ------------------------------- */
 
 window.addEventListener('online', async () => {
@@ -2148,4 +2287,5 @@ if ('serviceWorker' in navigator) {
   await flushOutbox();
   await loadData();
   trackDeviceInstallation();
+  proposerTuto();
 })();
