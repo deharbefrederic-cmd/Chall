@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '18/09 — cadastre';
+const VERSION = '18/09 — cadastre, HS 2';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -445,9 +445,12 @@ function renderList() {
 
   let filtered = records.filter((item) => {
     if (proximite && !proximite.includes(item.id)) return false;
-    // « Récents » suit la même limite que le badge MAJ : sept jours.
-    if (filterRecentOnly && (!item.updatedAt || Date.now() - item.updatedAt >= RECENT_MS)) {
-      return false;
+    // « Récents » : modifiées depuis moins de sept jours, plus les fiches
+    // signalées HS. Un signalement ne change pas la date de la fiche, il
+    // resterait donc invisible — alors que c'est ce qui demande une action.
+    if (filterRecentOnly) {
+      const recente = item.updatedAt && Date.now() - item.updatedAt < RECENT_MS;
+      if (!recente && !item.hs) return false;
     }
     if (!terms.length) return true;
     // Adresse seule (chercher « 69 » ne doit pas remonter les codes),
@@ -459,11 +462,11 @@ function renderList() {
   if (proximite) {
     // Ordre de distance renvoyé par le service, du plus proche au plus loin.
     filtered.sort((x, y) => proximite.indexOf(x.id) - proximite.indexOf(y.id));
+  } else if (filterRecentOnly) {
+    filtered.sort((x, y) => (y.updatedAt || 0) - (x.updatedAt || 0));
   } else {
     filtered.sort((x, y) =>
-      filterRecentOnly
-        ? (y.updatedAt || 0) - (x.updatedAt || 0)
-        : (x.address || '').localeCompare(y.address || '', 'fr', { numeric: true, sensitivity: 'base' })
+      (x.address || '').localeCompare(y.address || '', 'fr', { numeric: true, sensitivity: 'base' })
     );
   }
 
