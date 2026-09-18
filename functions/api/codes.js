@@ -9,7 +9,7 @@ export async function onRequestGet(context) {
 
   const { results } = await db
     .prepare(
-      `SELECT c.id, c.address, c.code, c.hs, c.created_at, c.updated_at, c.author,
+      `SELECT c.id, c.address, c.code, c.hs, c.hs_at, c.created_at, c.updated_at, c.author,
               c.groupe_id, d.nom_declare AS par_qui
        FROM codes c
        LEFT JOIN devices d ON d.client_id = c.maj_par
@@ -63,7 +63,7 @@ export async function onRequestPost(context) {
   const now = Date.now();
 
   const existing = await db
-    .prepare(`SELECT id, address, code, hs, created_at, updated_at, author FROM codes WHERE norm_address = ?1`)
+    .prepare(`SELECT id, address, code, hs, hs_at, created_at, updated_at, author FROM codes WHERE norm_address = ?1`)
     .bind(norm)
     .first();
 
@@ -86,7 +86,7 @@ export async function onRequestPost(context) {
       .run();
   } catch (err) {
     const again = await db
-      .prepare(`SELECT id, address, code, hs, created_at, updated_at, author FROM codes WHERE norm_address = ?1`)
+      .prepare(`SELECT id, address, code, hs, hs_at, created_at, updated_at, author FROM codes WHERE norm_address = ?1`)
       .bind(norm)
       .first();
     if (again) {
@@ -111,7 +111,7 @@ export async function onRequestPost(context) {
   );
 
   const created = await db
-    .prepare(`SELECT id, address, code, hs, created_at, updated_at, author FROM codes WHERE id = ?1`)
+    .prepare(`SELECT id, address, code, hs, hs_at, created_at, updated_at, author FROM codes WHERE id = ?1`)
     .bind(id)
     .first();
 

@@ -63,6 +63,8 @@ export function toRecord(row, me) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     groupe: row.groupe_id || null,
+    // Date du signalement hors service, pour l'afficher comme une modification.
+    hsAt: row.hs_at || null,
     // Prénom déclaré du dernier modificateur. Public, contrairement au modèle
     // de l'appareil, qui reste réservé au panneau d'administration.
     parQui: row.par_qui || null,
