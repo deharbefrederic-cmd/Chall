@@ -24,7 +24,7 @@ async function guard(context) {
   }
 
   const row = await db
-    .prepare(`SELECT id, address, code, hs, created_at, updated_at, author FROM codes WHERE id = ?1`)
+    .prepare(`SELECT id, address, code, hs, hs_at, created_at, updated_at, author FROM codes WHERE id = ?1`)
     .bind(id)
     .first();
 
@@ -117,6 +117,11 @@ export async function onRequestPatch(context) {
 
   if (annulation) hs = annulation.hs;
 
+  // Date du signalement : posée au passage en hors service, effacée au retour.
+  // Elle permet d'afficher « Signalé HS il y a x jours » sans toucher à la
+  // date de modification de la fiche.
+  const hsAt = hs ? (row.hs ? row.hs_at || now : now) : null;
+
   // Un signalement HS seul ne rajeunit pas la fiche : le badge « MAJ »
   // doit rester réservé aux changements de code ou d'adresse.
   const updatedAt = annulation
@@ -159,9 +164,10 @@ export async function onRequestPatch(context) {
       .bind(row.id, row.address, row.code, row.hs, me, now, row.updated_at),
     db
       .prepare(
-        `UPDATE codes SET address = ?1, norm_address = ?2, code = ?3, hs = ?4, updated_at = ?5, groupe_id = ?6, maj_par = ?7 WHERE id = ?8`
+        `UPDATE codes SET address = ?1, norm_address = ?2, code = ?3, hs = ?4, hs_at = ?5,
+                          updated_at = ?6, groupe_id = ?7, maj_par = ?8 WHERE id = ?9`
       )
-      .bind(address, norm, code, hs, updatedAt, groupeId, me, id)
+      .bind(address, norm, code, hs, hsAt, updatedAt, groupeId, me, id)
   ];
 
   for (const c of compagnes) {
@@ -175,7 +181,7 @@ export async function onRequestPatch(context) {
     );
     lot.push(
       db
-        .prepare(`UPDATE codes SET code = ?1, hs = 0, updated_at = ?2, groupe_id = ?3, maj_par = ?4 WHERE id = ?5`)
+        .prepare(`UPDATE codes SET code = ?1, hs = 0, hs_at = NULL, updated_at = ?2, groupe_id = ?3, maj_par = ?4 WHERE id = ?5`)
         .bind(code, now, groupeId, me, c.id)
     );
   }
@@ -190,7 +196,7 @@ export async function onRequestPatch(context) {
 
   return json({
     record: toRecord(
-      { ...row, address, code, hs, updated_at: updatedAt, groupe_id: groupeId, par_qui: parQui },
+      { ...row, address, code, hs, hs_at: hsAt, updated_at: updatedAt, groupe_id: groupeId, par_qui: parQui },
       me
     ),
     aussi: misAJour
