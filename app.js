@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '15/09 — position';
+const VERSION = '18/09 — cadastre';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -445,7 +445,10 @@ function renderList() {
 
   let filtered = records.filter((item) => {
     if (proximite && !proximite.includes(item.id)) return false;
-    if (filterRecentOnly && !item.updatedAt) return false;
+    // « Récents » suit la même limite que le badge MAJ : sept jours.
+    if (filterRecentOnly && (!item.updatedAt || Date.now() - item.updatedAt >= RECENT_MS)) {
+      return false;
+    }
     if (!terms.length) return true;
     // Adresse seule (chercher « 69 » ne doit pas remonter les codes),
     // et abréviations développées des deux côtés.
@@ -1222,8 +1225,8 @@ async function montrerJournal() {
     const lignes = [];
 
     for (const e of entrees) {
-      const apres = suivant.get(e.id) || { adresse: e.adresse, code: e.code };
-      suivant.set(e.id, { adresse: e.ancienneAdresse, code: e.ancienCode });
+      const apres = suivant.get(e.id) || { adresse: e.adresse, code: e.code, hs: e.hs };
+      suivant.set(e.id, { adresse: e.ancienneAdresse, code: e.ancienCode, hs: e.ancienHs });
 
       const quand = new Date(e.quand).toLocaleString('fr-FR', {
         day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
@@ -1240,6 +1243,10 @@ async function montrerJournal() {
         lignes.push(`${quand}  ${nom}\n   ${e.ancienCode} → ${apres.code}${par}`);
       } else if (e.ancienneAdresse !== apres.adresse) {
         lignes.push(`${quand}  ${nom}\n   renommée en ${apres.adresse}${par}`);
+      } else if (Number(e.ancienHs) !== Number(apres.hs)) {
+        lignes.push(
+          `${quand}  ${nom}\n   ${Number(apres.hs) ? '⚠️ signalée HS' : '✅ remise en service'}${par}`
+        );
       }
       // Les modifications sans effet réel ne sont pas affichées.
     }
@@ -1578,11 +1585,12 @@ async function ouvrirAdmin() {
   ajouter('📊 Statistiques', () => montrerStats());
   ajouter('🕘 Journal', () => montrerJournal());
   ajouter('📱 Appareils', () => montrerAppareils());
+  ajouter('🏘️ Résidences', () => montrerResidences());
   ajouter('💾 Exporter', () => {
     exporterCsv();
     fermer();
   });
-  ajouter("🔗 Lien d'accès", () => partagerLien(), { large: true });
+  ajouter("🔗 Lien d'accès", () => partagerLien());
   ajouter('Fermer', fermer, { large: true, classe: 'btn-cancel' });
 
   box.appendChild(barre);
@@ -1918,7 +1926,23 @@ async function autourDeMoi() {
 // déclenche seule la localisation et le bouton disparaît.
 const btnProximite = el('button', 'btn-toggle-recent', '📍 Autour de moi');
 btnProximite.type = 'button';
-btnProximite.addEventListener('click', () => {
+btnProximite.addEventListener('click', async () => {
+  // Un refus est mémorisé par le navigateur : une nouvelle tentative serait
+  // rejetée sans rien demander. Mieux vaut expliquer comment le lever.
+  if (etatPosition === 'denied') {
+    await showDialog({
+      title: 'Position bloquée',
+      message:
+        "Votre navigateur a mémorisé un refus pour ce site. Il ne redemandera plus.\n\n"
+        + "Pour la réactiver : appuyez sur l'icône à gauche de l'adresse du site, "
+        + "puis Autorisations ou Paramètres du site, puis Position → Autoriser.\n\n"
+        + "Dans l'application installée, passez par les réglages Android : "
+        + "Applications → Challivretou → Autorisations → Position.",
+      showCancel: false,
+      okText: 'Compris'
+    });
+    return;
+  }
   garderFiltre();
   autourDeMoi();
 });
@@ -2117,6 +2141,358 @@ window.addEventListener('popstate', () => {
   // déjà refermées à la main, jusqu'à sortir pour de bon.
   if (deroulement++ < 12) history.back();
 });
+
+/* --------------------- détection de résidences ------------------------- */
+
+// Deux entrées d'une même résidence sont rarement à plus de cette distance.
+const RAYON_RESIDENCE = 150;
+
+/** Coordonnées officielles d'une adresse, ou null si elle est introuvable. */
+async function geocoder(adresse) {
+  const url =
+    'https://data.geopf.fr/geocodage/search?index=address&limit=1&citycode=06088&q=' +
+    encodeURIComponent(adresse);
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const point = (data.features || [])[0];
+    if (!point || !point.geometry) return null;
+    const [lon, lat] = point.geometry.coordinates;
+    return { lat, lon };
+  } catch {
+    return null;
+  }
+}
+
+/** Parcelle cadastrale d'un point, via le relais du serveur. */
+async function parcellePour(point) {
+  if (!point) return null;
+  try {
+    const res = await api('/api/parcelle?lat=' + point.lat + '&lon=' + point.lon);
+    return res.parcelle ? { id: res.parcelle, libelle: res.libelle } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cherche les fiches qui partagent un même code et appartiennent vraisem-
+ * blablement à la même résidence : même parcelle cadastrale, ou à défaut
+ * quelques dizaines de mètres l'une de l'autre.
+ */
+async function detecterResidences() {
+  // Regroupement par code, en ignorant la casse et les espaces.
+  const parCode = new Map();
+  for (const r of records) {
+    const cle = (r.code || '').trim().toUpperCase();
+    if (!cle) continue;
+    if (!parCode.has(cle)) parCode.set(cle, []);
+    parCode.get(cle).push(r);
+  }
+
+  const candidats = [...parCode.values()].filter((lot) => {
+    if (lot.length < 2) return false;
+    // Déjà liées entre elles : rien à proposer.
+    const groupes = new Set(lot.map((r) => r.groupe || null));
+    return !(groupes.size === 1 && lot[0].groupe);
+  });
+
+  if (!candidats.length) {
+    await showDialog({
+      title: '🔍 Détection',
+      message: 'Aucun code partagé par plusieurs fiches non déjà liées.',
+      showCancel: false,
+      okText: 'Fermer'
+    });
+    return;
+  }
+
+  const combien = candidats.reduce((n, lot) => n + lot.length, 0);
+  const lancer = await showDialog({
+    title: '🔍 Détection',
+    message:
+      combien + ' fiches partagent un code avec une autre. Leurs adresses vont être '
+      + "localisées pour repérer celles qui appartiennent à une même résidence.\n\n"
+      + "Cela interroge le référentiel d'adresses, comptez quelques secondes.",
+    okText: 'Lancer',
+    cancelText: 'Annuler'
+  });
+  if (!lancer) return;
+
+  updateStatus('🏘️ Localisation des adresses...');
+  const positions = new Map();
+  for (const lot of candidats) {
+    for (const r of lot) {
+      if (positions.has(r.id)) continue;
+      positions.set(r.id, await geocoder(r.address));
+    }
+  }
+
+  updateStatus('🏘️ Consultation du cadastre...');
+  const parcelles = new Map();
+  for (const [id, point] of positions) {
+    parcelles.set(id, await parcellePour(point));
+  }
+  updateStatus();
+
+  // Un lot est retenu s'il partage une parcelle cadastrale, ou à défaut si
+  // ses adresses sont proches. La parcelle est une preuve, la distance un
+  // simple indice.
+  const propositions = [];
+  for (const lot of candidats) {
+    const situees = lot.filter((r) => positions.get(r.id));
+    if (situees.length < 2) continue;
+
+    let ecart = 0;
+    for (let i = 0; i < situees.length; i++) {
+      for (let j = i + 1; j < situees.length; j++) {
+        ecart = Math.max(
+          ecart,
+          distanceMetres(positions.get(situees[i].id), positions.get(situees[j].id))
+        );
+      }
+    }
+
+    const refs = situees.map((r) => parcelles.get(r.id)).filter(Boolean);
+    const memeParcelle =
+      refs.length === situees.length && new Set(refs.map((x) => x.id)).size === 1;
+
+    if (memeParcelle) {
+      propositions.push({ fiches: situees, ecart, parcelle: refs[0].libelle, certain: true });
+    } else if (ecart <= RAYON_RESIDENCE) {
+      propositions.push({ fiches: situees, ecart, parcelle: null, certain: false });
+    }
+  }
+
+  if (!propositions.length) {
+    await showDialog({
+      title: '🔍 Détection',
+      message:
+        'Des codes sont partagés, mais les adresses concernées sont trop éloignées '
+        + "les unes des autres pour appartenir à la même résidence.",
+      showCancel: false,
+      okText: 'Fermer'
+    });
+    return;
+  }
+
+  // Les regroupements confirmés par le cadastre passent devant.
+  propositions.sort((a, b) => Number(b.certain) - Number(a.certain) || a.ecart - b.ecart);
+
+  const corps = el('div');
+  corps.style.cssText =
+    'max-height:55vh;overflow-y:auto;touch-action:pan-y;overscroll-behavior:contain;';
+
+  for (const proposition of propositions) {
+    const ligne = el('div');
+    ligne.style.cssText = 'padding:12px 4px;border-bottom:1px solid #1e293b;';
+
+    const entete = el('div', null, 'Code ' + proposition.fiches[0].code);
+    entete.style.cssText = 'font-size:15px;font-weight:600;color:#e2e8f0;';
+
+    const preuve = el('div', null,
+      proposition.certain
+        ? '✅ même parcelle cadastrale' + (proposition.parcelle ? ' ' + proposition.parcelle : '')
+        : '📏 ' + proposition.ecart + ' m · parcelles différentes');
+    preuve.style.cssText =
+      'font-size:12px;margin-top:3px;color:' + (proposition.certain ? '#34d399' : '#94a3b8') + ';';
+
+    const liste = el('div', null, proposition.fiches.map((r) => r.address).join('\n'));
+    liste.style.cssText =
+      'font-size:13px;color:#94a3b8;margin-top:4px;white-space:pre-line;line-height:1.5;';
+
+    const lier = el('button', 'btn-save', 'Lier ces ' + proposition.fiches.length + ' fiches');
+    lier.type = 'button';
+    lier.style.cssText = 'margin-top:10px;padding:8px 14px;font-size:13px;';
+    lier.addEventListener('click', async () => {
+      lier.disabled = true;
+      try {
+        const res = await api('/api/groupes', {
+          method: 'POST',
+          body: JSON.stringify({ ids: proposition.fiches.map((r) => r.id) })
+        });
+        proposition.fiches.forEach((r) => {
+          r.groupe = res.groupe;
+        });
+        lier.textContent = '✓ Liées';
+      } catch {
+        lier.disabled = false;
+        showToast('Échec du regroupement');
+      }
+    });
+
+    ligne.append(entete, preuve, liste, lier);
+    corps.appendChild(ligne);
+  }
+
+  await panneau('🏘️ Résidences probables', corps, [
+    { texte: 'Fermer', valeur: null, classe: 'btn-cancel' }
+  ]);
+}
+
+/** Petite liste de sélection d'une fiche, avec filtre. Renvoie un id ou null. */
+function choisirFiche(exclus) {
+  return new Promise((resolve) => {
+    const modal = el('div', 'modal');
+    modal.style.display = 'flex';
+    const box = el('div', 'modal-content');
+    box.appendChild(el('h3', null, 'Ajouter une adresse'));
+
+    const champ = document.createElement('input');
+    champ.type = 'text';
+    champ.placeholder = 'Rechercher une adresse';
+    box.appendChild(champ);
+
+    const liste = el('div');
+    liste.style.cssText =
+      'max-height:40vh;overflow-y:auto;margin-top:10px;touch-action:pan-y;overscroll-behavior:contain;';
+    box.appendChild(liste);
+
+    const fermer = (valeur) => {
+      libererFond();
+      modal.remove();
+      resolve(valeur);
+    };
+
+    const remplir = () => {
+      liste.textContent = '';
+      const terms = searchKey(champ.value).split(' ').filter(Boolean);
+      const trouvees = records
+        .filter((r) => !exclus.includes(r.id))
+        .filter((r) => !terms.length || terms.every((t) => searchKey(r.address).includes(t)))
+        .slice(0, 12);
+
+      if (!trouvees.length) {
+        const vide = el('p', null, 'Aucune adresse.');
+        vide.style.cssText = 'font-size:13px;color:#64748b;padding:8px 2px;';
+        liste.appendChild(vide);
+        return;
+      }
+
+      for (const r of trouvees) {
+        const ligne = el('button', null, r.address + '  ·  ' + r.code);
+        ligne.type = 'button';
+        ligne.style.cssText =
+          'display:block;width:100%;text-align:left;background:transparent;border:0;' +
+          'border-bottom:1px solid #1e293b;padding:11px 2px;color:#cbd5e1;font-size:14px;';
+        ligne.addEventListener('click', () => fermer(r.id));
+        liste.appendChild(ligne);
+      }
+    };
+
+    champ.addEventListener('input', remplir);
+    remplir();
+
+    const barre = el('div');
+    barre.style.cssText = 'display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px;';
+    const annuler = el('button', 'btn-cancel', 'Annuler');
+    annuler.type = 'button';
+    annuler.style.cssText = 'width:100%;padding:12px;font-size:15px;';
+    annuler.addEventListener('click', () => fermer(null));
+    barre.appendChild(annuler);
+    box.appendChild(barre);
+
+    modal.appendChild(box);
+    document.body.appendChild(modal);
+    verrouillerFond();
+    champ.focus();
+  });
+}
+
+/** Résidences déjà constituées, et détection de nouvelles. */
+async function montrerResidences() {
+  const corps = el('div');
+  corps.style.cssText =
+    'max-height:55vh;overflow-y:auto;touch-action:pan-y;overscroll-behavior:contain;';
+
+  const dessiner = () => {
+    corps.textContent = '';
+
+    const groupes = new Map();
+    for (const r of records) {
+      if (!r.groupe) continue;
+      if (!groupes.has(r.groupe)) groupes.set(r.groupe, []);
+      groupes.get(r.groupe).push(r);
+    }
+
+    if (!groupes.size) {
+      const vide = el('p', null,
+        "Aucune résidence enregistrée. La détection ci-dessous en propose à partir des codes partagés.");
+      vide.style.cssText = 'font-size:13px;color:#64748b;line-height:1.5;padding:6px 2px 12px;';
+      corps.appendChild(vide);
+    }
+
+    for (const [id, fiches] of groupes) {
+      const bloc = el('div');
+      bloc.style.cssText = 'padding:12px 4px;border-bottom:1px solid #1e293b;';
+
+      const titre = el('div', null, fiches.length + ' entrées');
+      titre.style.cssText = 'font-size:14px;font-weight:600;color:#e2e8f0;margin-bottom:6px;';
+      bloc.appendChild(titre);
+
+      for (const f of fiches) {
+        const ligne = el('div');
+        ligne.style.cssText =
+          'display:flex;align-items:center;gap:8px;padding:3px 0;font-size:13px;color:#94a3b8;';
+
+        const texte = el('span', null, f.address + '  ·  ' + f.code);
+        texte.style.cssText = 'flex:1;';
+
+        const retirer = el('button', null, '✕');
+        retirer.type = 'button';
+        retirer.style.cssText =
+          'background:transparent;border:0;color:#64748b;font-size:15px;padding:2px 6px;';
+        retirer.addEventListener('click', async () => {
+          try {
+            await api('/api/groupes', { method: 'DELETE', body: JSON.stringify({ id: f.id }) });
+            f.groupe = null;
+            dessiner();
+            showToast('Retirée de la résidence');
+          } catch {
+            showToast('Échec du retrait');
+          }
+        });
+
+        ligne.append(texte, retirer);
+        bloc.appendChild(ligne);
+      }
+
+      const ajouter = el('button', 'btn-cancel', '+ Ajouter une adresse');
+      ajouter.type = 'button';
+      ajouter.style.cssText = 'margin-top:8px;padding:7px 12px;font-size:13px;';
+      ajouter.addEventListener('click', async () => {
+        const choisi = await choisirFiche(fiches.map((f) => f.id));
+        if (!choisi) return;
+        try {
+          await api('/api/groupes', {
+            method: 'POST',
+            body: JSON.stringify({ ids: [...fiches.map((f) => f.id), choisi] })
+          });
+          const fiche = records.find((r) => r.id === choisi);
+          if (fiche) fiche.groupe = id;
+          dessiner();
+          showToast('Adresse rattachée');
+        } catch {
+          showToast('Échec du rattachement');
+        }
+      });
+
+      bloc.appendChild(ajouter);
+      corps.appendChild(bloc);
+    }
+  };
+
+  dessiner();
+
+  const choix = await panneau('🏘️ Résidences', corps, [
+    { texte: '🔍 Détecter', valeur: 'detecter' },
+    { texte: 'Fermer', valeur: null, classe: 'btn-cancel' }
+  ]);
+
+  if (choix === 'detecter') await detecterResidences();
+}
+
 
 /* ------------------------------- guide ---------------------------------- */
 
