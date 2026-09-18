@@ -9,8 +9,8 @@ export async function onRequestGet(context) {
   const { results } = await context.env.DB
     .prepare(
       `SELECT h.id, h.archived_at, h.action,
-              h.address AS ancienne_adresse, h.code AS ancien_code,
-              c.address AS adresse, c.code AS code,
+              h.address AS ancienne_adresse, h.code AS ancien_code, h.hs AS ancien_hs,
+              c.address AS adresse, c.code AS code, c.hs AS hs,
               COALESCE(d.nom_admin, d.nom_declare, d.model, d.platform) AS auteur
        FROM codes_history h
        LEFT JOIN codes c ON c.id = h.id
@@ -28,9 +28,11 @@ export async function onRequestGet(context) {
       // État archivé, c'est-à-dire celui d'avant ce changement.
       ancienneAdresse: r.ancienne_adresse,
       ancienCode: r.ancien_code,
+      ancienHs: r.ancien_hs,
       // État actuel de la fiche, si elle existe encore.
       adresse: r.adresse,
       code: r.code,
+      hs: r.hs,
       auteur: r.auteur
     }))
   });
