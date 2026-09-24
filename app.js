@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — photo en bas de fiche';
+const VERSION = '24/09 — sans tuto au démarrage';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -2743,12 +2743,6 @@ function lancerTuto() {
   afficher();
 }
 
-/** Première ouverture : on montre le guide une fois la liste affichée. */
-function proposerTuto() {
-  if (localStorage.getItem(TUTO_KEY) || !records.length) return;
-  setTimeout(lancerTuto, 600);
-}
-
 /* ------------------------- registre des clients ------------------------- */
 
 const CLIENTS_CACHE_KEY = 'chall_clients_v1';
@@ -3546,5 +3540,4 @@ if ('serviceWorker' in navigator) {
   await loadData();
   await loadClients();
   trackDeviceInstallation();
-  proposerTuto();
 })();
