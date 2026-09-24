@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — clients autour de moi';
+const VERSION = '24/09 — clients récents';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -2703,7 +2703,11 @@ function codePourClient(c) {
 function buildClientCard(c) {
   const card = el('div', 'card');
   const info = el('div', 'card-info');
-  info.appendChild(el('div', 'client-nom', c.nom));
+  const titre = el('div', 'code-row');
+  titre.style.marginTop = '0';
+  titre.appendChild(el('span', 'client-nom', c.nom));
+  if (c.updatedAt && Date.now() - c.updatedAt < RECENT_MS) titre.appendChild(el('span', 'badge-tag badge-recent', 'MAJ'));
+  info.appendChild(titre);
   if (c.adresse) info.appendChild(el('div', 'client-adresse', '📍 ' + c.adresse));
   if (c.info) info.appendChild(el('div', 'client-info', c.info));
 
@@ -2741,13 +2745,15 @@ function renderClients() {
       .sort((x, y) => x.rang - y.rang)
       .map((x) => x.c);
   } else {
-    filtres = clients
-      .filter((c) => {
-        if (!terms.length) return true;
-        const cible = searchKey([c.nom, c.adresse, c.info].join(' '));
-        return terms.every((t) => cible.includes(t));
-      })
-      .sort((x, y) => (x.nom || '').localeCompare(y.nom || '', 'fr', { numeric: true, sensitivity: 'base' }));
+    filtres = clients.filter((c) => {
+      // « Récents » : fiches ajoutées ou modifiées ces sept derniers jours.
+      if (filterRecentOnly && !(c.updatedAt && Date.now() - c.updatedAt < RECENT_MS)) return false;
+      if (!terms.length) return true;
+      const cible = searchKey([c.nom, c.adresse, c.info].join(' '));
+      return terms.every((t) => cible.includes(t));
+    });
+    if (filterRecentOnly) filtres.sort((x, y) => (y.updatedAt || 0) - (x.updatedAt || 0));
+    else filtres.sort((x, y) => (x.nom || '').localeCompare(y.nom || '', 'fr', { numeric: true, sensitivity: 'base' }));
   }
 
   itemCount.textContent = proximite !== null
@@ -2758,6 +2764,7 @@ function renderClients() {
   if (!filtres.length) {
     const vide = proximite !== null
       ? 'Aucun client connu dans les ' + RAYON_METRES + ' m.'
+      : filterRecentOnly && !terms.length ? 'Aucun client modifié ces 7 derniers jours.'
       : clients.length ? 'Aucun client ne correspond.' : 'Aucun client enregistré. Appuyez sur + pour en ajouter un.';
     fragment.appendChild(el('div', 'empty-state', vide));
   } else {
@@ -2790,8 +2797,6 @@ function changerOnglet(nouveau) {
   codeList.hidden = surClients;
   clientList.hidden = !surClients;
 
-  // Filtres propres aux codes : masqués dans l'onglet Clients.
-  filterRecentBtn.style.display = surClients ? 'none' : '';
   quitterProximite();
 
   searchInput.value = '';
