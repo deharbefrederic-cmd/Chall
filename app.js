@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — fiche client structurée';
+const VERSION = '24/09 — fiche client complète';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -395,49 +395,55 @@ function buildCard(item) {
   const editBtn = el('button', 'btn-action', '✏️');
   editBtn.type = 'button';
   editBtn.setAttribute('aria-label', 'Appui long pour modifier ' + item.address);
-  editBtn.style.transition = 'background-color 600ms linear, transform 120ms';
 
-  // Appui long : évite d'ouvrir la fiche par erreur en visant la copie.
-  let minuteurEdit = null;
+  appuiLong(editBtn, () => openEdit(item.id));
+
+  actions.appendChild(editBtn);
+  card.append(info, actions);
+  return card;
+}
+
+/**
+ * Appui long : évite d'ouvrir une fiche en modification par erreur.
+ * Le bouton se remplit de bleu pendant l'appui ; un appui bref explique quoi faire.
+ */
+function appuiLong(bouton, action) {
+  bouton.style.transition = 'background-color 600ms linear, transform 120ms';
+  let minuteur = null;
   let declenche = false;
 
   const armer = (e) => {
     e.stopPropagation();
     declenche = false;
-    editBtn.style.backgroundColor = '#2563eb'; // remplissage progressif
-    minuteurEdit = setTimeout(() => {
+    bouton.style.backgroundColor = '#2563eb'; // remplissage progressif
+    minuteur = setTimeout(() => {
       declenche = true;
-      minuteurEdit = null;
-      editBtn.style.backgroundColor = '';
-      editBtn.style.transform = 'scale(0.9)';
-      setTimeout(() => { editBtn.style.transform = ''; }, 120);
+      minuteur = null;
+      bouton.style.backgroundColor = '';
+      bouton.style.transform = 'scale(0.9)';
+      setTimeout(() => { bouton.style.transform = ''; }, 120);
       if (navigator.vibrate) navigator.vibrate(20);
-      openEdit(item.id);
+      action();
     }, 600);
   };
 
   const desarmer = () => {
-    clearTimeout(minuteurEdit);
-    minuteurEdit = null;
-    editBtn.style.backgroundColor = '';
+    clearTimeout(minuteur);
+    minuteur = null;
+    bouton.style.backgroundColor = '';
   };
 
-  editBtn.addEventListener('pointerdown', armer);
-  editBtn.addEventListener('pointerup', desarmer);
-  editBtn.addEventListener('pointerleave', desarmer);
-  editBtn.addEventListener('pointercancel', desarmer);
-  editBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+  bouton.addEventListener('pointerdown', armer);
+  bouton.addEventListener('pointerup', desarmer);
+  bouton.addEventListener('pointerleave', desarmer);
+  bouton.addEventListener('pointercancel', desarmer);
+  bouton.addEventListener('contextmenu', (e) => e.preventDefault());
 
-  // Un appui bref n'ouvre rien, mais explique quoi faire.
-  editBtn.addEventListener('click', (e) => {
+  bouton.addEventListener('click', (e) => {
     e.stopPropagation();
     if (!declenche) showToast('Appui long pour modifier');
     declenche = false;
   });
-
-  actions.appendChild(editBtn);
-  card.append(info, actions);
-  return card;
 }
 
 function majBoutonEffacer() {
@@ -2712,7 +2718,7 @@ const clientEtage = $('clientEtage');
 const clientInterphone = $('clientInterphone');
 
 // Ordre de saisie : la touche « Suivant » du clavier passe au champ d'après.
-const CHAMPS_CLIENT = [clientNom, clientAdresse, clientBatiment, clientEtage, clientInterphone, clientInfo];
+const CHAMPS_CLIENT = [clientNom, clientAdresse, clientInterphone, clientBatiment, clientEtage, clientInfo];
 CHAMPS_CLIENT.slice(0, -1).forEach((champ, i) => {
   champ.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || e.isComposing) return;
@@ -2726,7 +2732,7 @@ const clientSaveBtn = $('clientSaveBtn');
 const saveClientsCache = () => writeJson(CLIENTS_CACHE_KEY, clients);
 
 // Prédiction d'adresse, la même que pour les codes.
-const suggestionsClient = brancherSuggestions(clientAdresse, clientBatiment);
+const suggestionsClient = brancherSuggestions(clientAdresse, clientInterphone);
 
 /**
  * Nouveau client : propose les adresses officielles autour de soi, comme
@@ -2747,10 +2753,49 @@ async function proposerAdressesClient() {
 }
 
 /** Code d'accès connu pour l'adresse du client, seulement s'il est sans ambiguïté. */
-function codePourClient(c) {
-  if (!c.adresse) return null;
-  const fiches = fichesPour(c.adresse);
-  return fiches.length === 1 ? fiches[0] : null;
+/**
+ * Codes d'accès correspondant à l'adresse du client.
+ * 1. fiches qui contiennent l'adresse du client (« 12 Rue X » trouve aussi
+ *    « 12 Rue X Bât A ») ;
+ * 2. sinon, fiches plus courtes contenues dans l'adresse du client
+ *    (« 190 Pessicart » pour « 190 Route de Pessicart »), numéro exigé ;
+ * puis, s'il en reste plusieurs, on garde l'adresse identique, ou celles
+ * qui citent le bâtiment du client. Trois au plus.
+ */
+function codesPourClient(c) {
+  if (!c.adresse) return [];
+  let fiches = fichesPour(c.adresse);
+  if (!fiches.length) {
+    fiches = records.filter((r) => /\d/.test(r.address || '') && correspondAdresse(r.address, c.adresse));
+  }
+  if (fiches.length > 1) {
+    const cle = searchKey(c.adresse);
+    const exactes = fiches.filter((r) => searchKey(r.address) === cle);
+    if (exactes.length) fiches = exactes;
+  }
+  if (fiches.length > 1 && c.batiment) {
+    const bat = searchKey(c.batiment);
+    const duBatiment = fiches.filter((r) => searchKey(r.address).split(' ').includes(bat));
+    if (duBatiment.length) fiches = duBatiment;
+  }
+  return fiches.slice(0, 3);
+}
+
+/** Pastilles de code : l'adresse n'est précisée que s'il y en a plusieurs. */
+function pastillesCode(c) {
+  const fiches = codesPourClient(c);
+  return fiches.map((f) =>
+    el('div', 'client-code', '🔑 ' + f.code + (f.hs ? ' (HS)' : '') + (fiches.length > 1 ? ' · ' + f.address : ''))
+  );
+}
+
+/** Interphone, bâtiment, étage : dans cet ordre de priorité, même écriture. */
+function detailsClient(c) {
+  const details = [];
+  if (c.interphone) details.push(['🔔', 'Interphone', c.interphone]);
+  if (c.batiment) details.push(['🏢', 'Bâtiment', c.batiment]);
+  if (c.etage) details.push(['⬆️', 'Étage', c.etage]);
+  return details;
 }
 
 function buildClientCard(c) {
@@ -2762,20 +2807,20 @@ function buildClientCard(c) {
   if (c.updatedAt && Date.now() - c.updatedAt < RECENT_MS) titre.appendChild(el('span', 'badge-tag badge-recent', 'MAJ'));
   info.appendChild(titre);
   if (c.adresse) info.appendChild(el('div', 'client-adresse', '📍 ' + c.adresse));
-  // Bâtiment, étage, interphone : toujours dans le même ordre, même écriture.
-  const details = [];
-  if (c.batiment) details.push('🏢 Bât. ' + c.batiment);
-  if (c.etage) details.push(c.etage === 'RDC' ? '⬆️ RDC' : '⬆️ Ét. ' + c.etage);
-  if (c.interphone) details.push('🔔 ' + c.interphone);
+  const details = detailsClient(c);
   if (details.length) {
     const ligne = el('div', 'client-details');
-    details.forEach((d) => ligne.appendChild(el('span', 'client-tag', d)));
+    details.forEach(([icone, libelle, valeur]) => {
+      const court = libelle === 'Bâtiment' ? 'Bât. ' + valeur
+        : libelle === 'Étage' ? (valeur === 'RDC' ? 'RDC' : 'Ét. ' + valeur)
+        : valeur;
+      ligne.appendChild(el('span', 'client-tag', icone + ' ' + court));
+    });
     info.appendChild(ligne);
   }
   if (c.info) info.appendChild(el('div', 'client-info', c.info));
 
-  const fiche = codePourClient(c);
-  if (fiche) info.appendChild(el('div', 'client-code', '🔑 ' + fiche.code + (fiche.hs ? ' (HS)' : '')));
+  pastillesCode(c).forEach((p) => info.appendChild(p));
 
   const dateLabel = formatUpdateDate(c.updatedAt);
   if (dateLabel) {
@@ -2786,12 +2831,77 @@ function buildClientCard(c) {
   const actions = el('div', 'actions');
   const editBtn = el('button', 'btn-action', '✏️');
   editBtn.type = 'button';
-  editBtn.setAttribute('aria-label', 'Modifier ' + c.nom);
-  editBtn.addEventListener('click', () => ouvrirClient(c.id));
+  editBtn.setAttribute('aria-label', 'Appui long pour modifier ' + c.nom);
+  appuiLong(editBtn, () => ouvrirClient(c.id));
   actions.appendChild(editBtn);
+
+  // Toucher la carte affiche la fiche complète, en lecture seule.
+  card.classList.add('card-cliquable');
+  card.addEventListener('click', () => montrerFicheClient(c.id));
 
   card.append(info, actions);
   return card;
+}
+
+/** Fiche client complète, en grand, sans risque de modification. */
+function montrerFicheClient(id) {
+  const c = clients.find((x) => x.id === id);
+  if (!c) return;
+
+  const modal = el('div', 'modal fiche-client');
+  modal.style.display = 'flex';
+  const box = el('div', 'modal-content');
+
+  box.appendChild(el('h3', 'fiche-nom', c.nom));
+  if (c.adresse) box.appendChild(el('div', 'fiche-adresse', '📍 ' + c.adresse));
+
+  const grille = el('div', 'fiche-grille');
+  detailsClient(c).forEach(([icone, libelle, valeur]) => {
+    grille.appendChild(el('div', 'fiche-libelle', icone + ' ' + libelle));
+    grille.appendChild(el('div', 'fiche-valeur', valeur));
+  });
+  if (grille.childElementCount) box.appendChild(grille);
+
+  const codes = pastillesCode(c);
+  if (codes.length) {
+    const bloc = el('div', 'fiche-codes');
+    codes.forEach((p) => bloc.appendChild(p));
+    box.appendChild(bloc);
+  }
+
+  if (c.info) {
+    box.appendChild(el('div', 'fiche-libelle', '📝 Remarque'));
+    box.appendChild(el('div', 'client-info fiche-remarque', c.info));
+  }
+
+  const dateLabel = formatUpdateDate(c.updatedAt);
+  if (dateLabel) {
+    box.appendChild(el('div', 'updated-date', '🕒 Modifié : ' + dateLabel + (c.parQui ? ' · par ' + c.parQui : '')));
+  }
+
+  const fermer = () => {
+    libererFond();
+    modal.remove();
+  };
+
+  const barre = el('div', 'modal-btns');
+  const modifier = el('button', 'btn-cancel', '✏️ Modifier');
+  modifier.type = 'button';
+  modifier.addEventListener('click', () => {
+    fermer();
+    ouvrirClient(c.id);
+  });
+  const bouton = el('button', 'btn-save', 'Fermer');
+  bouton.type = 'button';
+  bouton.addEventListener('click', fermer);
+  // Toucher le fond sombre referme aussi.
+  modal.addEventListener('click', (e) => { if (e.target === modal) fermer(); });
+  barre.append(modifier, bouton);
+  box.appendChild(barre);
+
+  modal.appendChild(box);
+  document.body.appendChild(modal);
+  verrouillerFond();
 }
 
 function renderClients() {

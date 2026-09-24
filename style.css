@@ -526,3 +526,66 @@ textarea:focus-visible {
   -webkit-user-select: text;
   user-select: text;
 }
+
+/* --- Fiche client complète --- */
+
+.card-cliquable {
+  cursor: pointer;
+}
+
+.card-cliquable:active {
+  background: #273449;
+}
+
+.fiche-client {
+  align-items: flex-start;
+  padding-top: max(24px, env(safe-area-inset-top));
+  overflow-y: auto;
+}
+
+.fiche-nom {
+  font-size: 22px;
+  margin-bottom: 4px;
+}
+
+.fiche-adresse {
+  font-size: 17px;
+  color: #cbd5e1;
+  margin-bottom: 14px;
+}
+
+.fiche-grille {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 14px;
+  align-items: baseline;
+  margin-bottom: 14px;
+}
+
+.fiche-libelle {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.fiche-valeur {
+  font-size: 20px;
+  font-weight: 700;
+  color: #f8fafc;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.fiche-codes .client-code {
+  font-size: 18px;
+  padding: 4px 10px;
+}
+
+.fiche-remarque {
+  font-size: 15px;
+  color: #e2e8f0;
+  margin: 4px 0 12px;
+}
+
+.fiche-codes {
+  margin-bottom: 12px;
+}
