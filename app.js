@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — vibration appui long';
+const VERSION = '24/09 — codes épinglés';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -365,13 +365,24 @@ function el(tag, className, text) {
   return node;
 }
 
+// Fiches épinglées en tête de l'onglet Codes, dans cet ordre. La
+// comparaison ignore accents et majuscules : « Accès bureau Carrefour »
+// et « acces bureau carrefour » sont la même fiche.
+const EPINGLES = ['code wc', 'acces bureau carrefour'];
+
+/** Rang d'épinglage de la fiche, -1 si elle n'est pas épinglée. */
+function rangEpingle(item) {
+  const cle = searchKey(item.address);
+  return EPINGLES.findIndex((e) => cle === searchKey(e) || cle.startsWith(searchKey(e) + ' '));
+}
+
 function buildCard(item) {
   const isHS = Boolean(item.hs);
   const isRecent = item.updatedAt && Date.now() - item.updatedAt < RECENT_MS;
 
   const card = el('div', 'card' + (isHS ? ' is-hs' : ''));
   const info = el('div', 'card-info');
-  info.appendChild(el('div', 'address', item.address));
+  info.appendChild(el('div', 'address', (rangEpingle(item) !== -1 ? '📌 ' : '') + item.address));
 
   const row = el('div', 'code-row');
   row.appendChild(el('div', 'code-badge' + (isHS ? ' hs' : ''), (isHS ? '⚠️ ' : '') + item.code));
@@ -488,7 +499,13 @@ function renderList() {
     const quand = (r) => Math.max(r.updatedAt || 0, (r.hs && r.hsAt) || 0);
     filtered.sort((x, y) => quand(y) - quand(x));
   } else {
+    // Épinglées d'abord, dans l'ordre de la liste ; le reste par adresse.
+    const rang = (r) => {
+      const i = rangEpingle(r);
+      return i === -1 ? EPINGLES.length : i;
+    };
     filtered.sort((x, y) =>
+      rang(x) - rang(y) ||
       (x.address || '').localeCompare(y.address || '', 'fr', { numeric: true, sensitivity: 'base' })
     );
   }
