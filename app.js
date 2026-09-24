@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — sans tuto au démarrage';
+const VERSION = '24/09 — clients par nom de famille';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -2869,6 +2869,33 @@ function detailsClient(c) {
   return details;
 }
 
+const CIVILITES = /^(m|mr|mme|mlle|melle|dr|me)\.?$/i;
+
+/**
+ * Nom de famille déduit de la fiche, pour le classement alphabétique.
+ * 1. l'interphone, s'il porte un nom (sans chiffre) : c'est le nom sur la plaque ;
+ * 2. sinon, les mots écrits en MAJUSCULES quand le reste ne l'est pas
+ *    (« Josiane MEJIDO » -> MEJIDO) ;
+ * 3. sinon, tout sauf le premier mot, pris pour le prénom
+ *    (« Patricia Monge » -> Monge).
+ */
+function nomDeFamille(c) {
+  const mots = (texte) => (texte || '').split(/\s+/).filter((m) => m && !CIVILITES.test(m));
+
+  const plaque = mots(c.interphone);
+  if (plaque.length && !/\d/.test(c.interphone)) return plaque.join(' ');
+
+  const nom = mots(c.nom);
+  const estMaj = (m) => /[A-ZÀ-Þ]/.test(m) && m === m.toUpperCase();
+  const maj = nom.filter(estMaj);
+  if (maj.length && maj.length < nom.length) return maj.join(' ');
+
+  return nom.length > 1 ? nom.slice(1).join(' ') : nom.join(' ');
+}
+
+/** Clé de tri : nom de famille, puis nom complet pour départager. */
+const cleTriClient = (c) => nomDeFamille(c) + ' ' + (c.nom || '');
+
 /** Fiches clients dont une modification attend encore le réseau. */
 function idsEnAttente() {
   return new Set(loadOutbox().filter((op) => /^(client|photo)-/.test(op.kind)).map((op) => op.id));
@@ -3024,7 +3051,7 @@ function renderClients() {
       return terms.every((t) => cible.includes(t));
     });
     if (filterRecentOnly) filtres.sort((x, y) => (y.updatedAt || 0) - (x.updatedAt || 0));
-    else filtres.sort((x, y) => (x.nom || '').localeCompare(y.nom || '', 'fr', { numeric: true, sensitivity: 'base' }));
+    else filtres.sort((x, y) => cleTriClient(x).localeCompare(cleTriClient(y), 'fr', { numeric: true, sensitivity: 'base' }));
   }
 
   itemCount.textContent = proximite !== null
