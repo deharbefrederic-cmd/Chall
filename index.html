@@ -114,10 +114,13 @@
     </div>
     <label for="clientInfo" class="champ-label">Remarque</label>
     <textarea id="clientInfo" maxlength="500" rows="2" placeholder="Où déposer, gardien, horaires..."></textarea>
-    <input type="file" id="clientPhotoInput" accept="image/*" hidden>
+    <!-- Deux champs : capture ouvre directement l'appareil photo, l'autre la galerie. -->
+    <input type="file" id="clientPhotoCamera" accept="image/*" capture="environment" hidden>
+    <input type="file" id="clientPhotoGalerie" accept="image/*" hidden>
     <img id="clientPhotoApercu" class="photo-apercu" alt="Photo de l'entrée" hidden>
     <div class="photo-actions">
-      <button class="btn-cancel" id="clientPhotoBtn" type="button">📷 Ajouter une photo</button>
+      <button class="btn-cancel" id="clientPhotoBtn" type="button">📷 Appareil photo</button>
+      <button class="btn-cancel" id="clientGalerieBtn" type="button">🖼️ Galerie</button>
       <button class="btn-cancel" id="clientPhotoSuppr" type="button" hidden>Retirer</button>
     </div>
     <div class="modal-btns">

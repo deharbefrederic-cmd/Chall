@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — photos et hors ligne';
+const VERSION = '24/09 — photo appareil ou galerie';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -3433,7 +3433,9 @@ async function compresserPhoto(fichier) {
 
 // Photo choisie dans le formulaire ouvert : Blob, 'effacer', ou null (inchangée).
 let photoChoisie = null;
-const clientPhotoInput = $('clientPhotoInput');
+const clientPhotoCamera = $('clientPhotoCamera');
+const clientPhotoGalerie = $('clientPhotoGalerie');
+const clientGalerieBtn = $('clientGalerieBtn');
 const clientPhotoApercu = $('clientPhotoApercu');
 const clientPhotoBtn = $('clientPhotoBtn');
 const clientPhotoSuppr = $('clientPhotoSuppr');
@@ -3444,12 +3446,12 @@ function afficherApercu(url) {
   clientPhotoApercu.src = url || '';
   clientPhotoApercu.hidden = !url;
   clientPhotoSuppr.hidden = !url;
-  clientPhotoBtn.textContent = url ? '📷 Changer la photo' : '📷 Ajouter une photo';
 }
 
 async function preparerPhotoFormulaire(c) {
   photoChoisie = null;
-  clientPhotoInput.value = '';
+  clientPhotoCamera.value = '';
+  clientPhotoGalerie.value = '';
   afficherApercu(null);
   if (c) {
     const url = await urlPhoto(c);
@@ -3459,13 +3461,15 @@ async function preparerPhotoFormulaire(c) {
   }
 }
 
-clientPhotoBtn.addEventListener('click', () => clientPhotoInput.click());
+clientPhotoBtn.addEventListener('click', () => clientPhotoCamera.click());
+clientGalerieBtn.addEventListener('click', () => clientPhotoGalerie.click());
 
-clientPhotoInput.addEventListener('change', async () => {
-  const fichier = clientPhotoInput.files && clientPhotoInput.files[0];
+async function photoSelectionnee(input) {
+  const fichier = input.files && input.files[0];
+  input.value = '';
   if (!fichier) return;
   try {
-    clientPhotoBtn.textContent = '⏳ Préparation...';
+    showToast('⏳ Préparation de la photo...');
     photoChoisie = await compresserPhoto(fichier);
     afficherApercu(URL.createObjectURL(photoChoisie));
   } catch {
@@ -3473,7 +3477,10 @@ clientPhotoInput.addEventListener('change', async () => {
     afficherApercu(null);
     showToast('Photo illisible');
   }
-});
+}
+
+clientPhotoCamera.addEventListener('change', () => photoSelectionnee(clientPhotoCamera));
+clientPhotoGalerie.addEventListener('change', () => photoSelectionnee(clientPhotoGalerie));
 
 clientPhotoSuppr.addEventListener('click', () => {
   photoChoisie = 'effacer';

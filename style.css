@@ -594,7 +594,7 @@ textarea:focus-visible {
 
 .photo-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   margin: -6px 0 6px;
 }
 
@@ -644,4 +644,15 @@ textarea:focus-visible {
 .badge-attente {
   background: #422006;
   color: #fcd34d;
+}
+
+.photo-actions button {
+  flex: 1 1 0;
+  padding: 10px 6px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.photo-actions button[hidden] {
+  display: none;
 }
