@@ -58,6 +58,7 @@ et renvoyez le nouveau lien à l'équipe.
   clients.js          GET liste · POST création (registre des clients)
   clients/[id].js     PATCH modification · DELETE suppression
   _clients.js         table `clients` (créée automatiquement), validation
+  photos/[id].js      GET · PUT · DELETE photo d'une fiche client (R2)
   stats.js            compteurs d'installation
   ping.js             validation de clé
 schema.sql            tables D1
@@ -88,12 +89,32 @@ La recherche porte sur les trois champs. Si l'adresse correspond sans
 ambiguïté à une fiche de l'onglet Codes, le code s'affiche sur la carte.
 
 La table `clients` est créée toute seule à la première utilisation : rien
-à exécuter dans la console D1. Les fiches restent lisibles hors ligne, mais
-leur enregistrement demande du réseau. Une fiche ne peut être supprimée que
-par son auteur ou par l'administrateur.
+à exécuter dans la console D1. Comme les codes, les fiches se lisent et se
+modifient hors ligne : les modifications partent d'elles-mêmes au retour
+du réseau (badge « ⏳ À envoyer » en attendant). Une fiche ne peut être
+supprimée que par son auteur ou par l'administrateur.
+
+### Photos des fiches clients
+
+Une photo par client (porte, boîte aux lettres, interphone), réduite sur le
+téléphone vers 150 Ko avant l'envoi. Elles sont stockées dans Cloudflare R2.
+Pour les activer (une seule fois, dans le tableau de bord) :
+
+1. **R2 Object Storage** → Create bucket → nom `challivretou-photos`.
+   Cloudflare peut demander d'enregistrer un moyen de paiement pour activer
+   R2, même si l'usage reste dans l'offre gratuite (10 Go).
+2. Projet Pages → **Settings → Bindings** → Add → R2 bucket →
+   nom de variable `PHOTOS`, bucket `challivretou-photos`.
+   Production **et** Preview.
+3. Redéployer (Deployments → dernier déploiement → Retry deployment) :
+   une liaison ne prend effet qu'au déploiement suivant.
+
+Tant que la liaison n'existe pas, tout le reste fonctionne ; seule la photo
+est refusée, avec un message.
 
 Ce registre contient des données personnelles de tiers : n'y noter que ce
-qui sert à la livraison.
+qui sert à la livraison. Photos : uniquement des lieux, jamais de personnes
+ni l'intérieur d'un logement.
 
 ## Restriction d'accès complémentaire (recommandé)
 

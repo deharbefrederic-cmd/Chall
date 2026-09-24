@@ -114,6 +114,12 @@
     </div>
     <label for="clientInfo" class="champ-label">Remarque</label>
     <textarea id="clientInfo" maxlength="500" rows="2" placeholder="Où déposer, gardien, horaires..."></textarea>
+    <input type="file" id="clientPhotoInput" accept="image/*" hidden>
+    <img id="clientPhotoApercu" class="photo-apercu" alt="Photo de l'entrée" hidden>
+    <div class="photo-actions">
+      <button class="btn-cancel" id="clientPhotoBtn" type="button">📷 Ajouter une photo</button>
+      <button class="btn-cancel" id="clientPhotoSuppr" type="button" hidden>Retirer</button>
+    </div>
     <div class="modal-btns">
       <div class="modal-btns-left">
         <button class="btn-delete" id="clientDeleteBtn" type="button">🗑️ Suppr.</button>

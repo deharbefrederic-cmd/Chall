@@ -11,7 +11,7 @@ export async function onRequestGet(context) {
 
   const { results } = await db
     .prepare(
-      `SELECT c.id, c.nom, c.adresse, c.info, c.batiment, c.etage, c.interphone,
+      `SELECT c.id, c.nom, c.adresse, c.info, c.batiment, c.etage, c.interphone, c.photo,
               c.created_at, c.updated_at, c.author,
               d.nom_declare AS par_qui
        FROM clients c

@@ -1,5 +1,5 @@
 // Bumper CACHE_VERSION à chaque déploiement pour forcer la mise à jour du shell.
-const CACHE_VERSION = 'chall-v14';
+const CACHE_VERSION = 'chall-v15';
 const SHELL = [
   '/',
   '/index.html',
@@ -20,7 +20,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE_VERSION).map((k) => caches.delete(k))))
+      // Les photos des fiches clients survivent aux mises à jour de l'appli.
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE_VERSION && k !== 'chall-photos').map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });

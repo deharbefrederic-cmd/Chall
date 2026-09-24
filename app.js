@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — codes épinglés';
+const VERSION = '24/09 — photos et hors ligne';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -137,10 +137,16 @@ async function api(path, options = {}) {
     ...(localStorage.getItem(ADMIN_KEY) ? { 'X-Chall-Admin': localStorage.getItem(ADMIN_KEY) } : {}),
     ...(localStorage.getItem(NOM_KEY) ? { 'X-Chall-Nom': localStorage.getItem(NOM_KEY) } : {}),
     ...(etatPosition ? { 'X-Chall-Geo': etatPosition } : {}),
-    ...(options.body ? { 'Content-Type': 'application/json' } : {})
+    ...(options.body ? { 'Content-Type': options.type || 'application/json' } : {})
   };
 
-  const res = await fetch(path, { ...options, headers, cache: 'no-store' });
+  const { type, brut, ...reste } = options;
+  const res = await fetch(path, { ...reste, headers, cache: 'no-store' });
+  // Réponse binaire (photo) : rendue telle quelle à l'appelant.
+  if (brut) {
+    if (!res.ok) throw new ApiError(res.status, null);
+    return res;
+  }
 
   let payload = null;
   try {
@@ -561,6 +567,23 @@ async function loadData({ silent = false } = {}) {
 }
 
 function sendOp(op) {
+  if (op.kind === 'client-create') {
+    return api('/api/clients', { method: 'POST', body: JSON.stringify({ id: op.id, ...op.champs }) });
+  }
+  if (op.kind === 'client-patch') {
+    return api('/api/clients/' + encodeURIComponent(op.id), { method: 'PATCH', body: JSON.stringify(op.champs) });
+  }
+  if (op.kind === 'client-delete') {
+    return api('/api/clients/' + encodeURIComponent(op.id), { method: 'DELETE' });
+  }
+  if (op.kind === 'photo-put') return envoyerPhoto(op.id);
+  if (op.kind === 'photo-delete') {
+    return api('/api/photos/' + encodeURIComponent(op.id), { method: 'DELETE' }).then(async (data) => {
+      await photoEnAttente.effacer(op.id);
+      await oublierPhotoCache(op.id);
+      return data;
+    });
+  }
   if (op.kind === 'create') {
     return api('/api/codes', {
       method: 'POST',
@@ -595,11 +618,15 @@ async function flushOutbox() {
         openGate('Clé refusée. Saisissez la clé à jour.');
         return false;
       }
-      if (err.status === 429 || err.status === undefined || err.status >= 500) {
+      // Stockage photo pas encore activé : l'attente serait sans fin et
+      // bloquerait tout le reste de la file. La photo est abandonnée.
+      const photosOff = err.payload && err.payload.error === 'photos_off';
+      if (!photosOff && (err.status === 429 || err.status === undefined || err.status >= 500)) {
         updateStatus(); // problème temporaire : on retentera plus tard
         return false;
       }
       dropped.push({ op, message: err.message });
+      if (op.kind === 'photo-put') await photoEnAttente.effacer(op.id);
       ops.shift();
       saveOutbox(ops);
     }
@@ -2848,6 +2875,11 @@ function detailsClient(c) {
   return details;
 }
 
+/** Fiches clients dont une modification attend encore le réseau. */
+function idsEnAttente() {
+  return new Set(loadOutbox().filter((op) => /^(client|photo)-/.test(op.kind)).map((op) => op.id));
+}
+
 function buildClientCard(c) {
   const card = el('div', 'card');
   const info = el('div', 'card-info');
@@ -2855,6 +2887,8 @@ function buildClientCard(c) {
   titre.style.marginTop = '0';
   titre.appendChild(el('span', 'client-nom', c.nom));
   if (c.updatedAt && Date.now() - c.updatedAt < RECENT_MS) titre.appendChild(el('span', 'badge-tag badge-recent', 'MAJ'));
+  if (c.photo || c.photoLocale) titre.appendChild(el('span', 'badge-tag badge-photo', '📷'));
+  if (idsEnAttente().has(c.id)) titre.appendChild(el('span', 'badge-tag badge-attente', '⏳ À envoyer'));
   info.appendChild(titre);
   if (c.adresse) info.appendChild(el('div', 'client-adresse', '📍 ' + c.adresse));
   const details = detailsClient(c);
@@ -2905,6 +2939,21 @@ function montrerFicheClient(id) {
   box.appendChild(el('h3', 'fiche-nom', c.nom));
   if (c.adresse) box.appendChild(el('div', 'fiche-adresse', '📍 ' + c.adresse));
 
+  // Photo chargée à part : la fiche s'affiche sans l'attendre.
+  if (c.photo || c.photoLocale) {
+    const img = el('img', 'fiche-photo');
+    img.alt = 'Photo de l’entrée';
+    img.hidden = true;
+    box.appendChild(img);
+    urlPhoto(c).then((url) => {
+      if (!url) return;
+      img.src = url;
+      img.hidden = false;
+      // Toucher la photo l'affiche en plein écran, toucher encore la réduit.
+      img.addEventListener('click', () => img.classList.toggle('plein-ecran'));
+    });
+  }
+
   const grille = el('div', 'fiche-grille');
   detailsClient(c).forEach(([icone, libelle, valeur]) => {
     grille.appendChild(el('div', 'fiche-libelle', icone + ' ' + libelle));
@@ -2931,6 +2980,8 @@ function montrerFicheClient(id) {
 
   const fermer = () => {
     libererFond();
+    const img = modal.querySelector('.fiche-photo');
+    if (img && img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
     modal.remove();
   };
 
@@ -2998,10 +3049,32 @@ function renderClients() {
   clientList.replaceChildren(fragment);
 }
 
+/**
+ * Rejoue sur la liste reçue du serveur les modifications encore en attente
+ * d'envoi : une fiche créée hors ligne ne disparaît pas au rafraîchissement.
+ */
+function appliquerAttente(liste) {
+  for (const op of loadOutbox()) {
+    const i = liste.findIndex((c) => c.id === op.id);
+    if (op.kind === 'client-create' && i === -1) {
+      liste.push({ id: op.id, ...op.champs, createdAt: op.ts, updatedAt: op.ts, isMine: true, enAttente: true });
+    } else if (op.kind === 'client-patch' && i !== -1) {
+      liste[i] = { ...liste[i], ...op.champs, updatedAt: op.ts, enAttente: true };
+    } else if (op.kind === 'client-delete' && i !== -1) {
+      liste.splice(i, 1);
+    } else if (op.kind === 'photo-put' && i !== -1) {
+      liste[i] = { ...liste[i], photoLocale: true, enAttente: true };
+    } else if (op.kind === 'photo-delete' && i !== -1) {
+      liste[i] = { ...liste[i], photo: null, photoLocale: false, enAttente: true };
+    }
+  }
+  return liste;
+}
+
 async function loadClients() {
   try {
     const data = await api('/api/clients');
-    clients = Array.isArray(data.clients) ? data.clients : [];
+    clients = appliquerAttente(Array.isArray(data.clients) ? data.clients : []);
     saveClientsCache();
   } catch (err) {
     if (err.status === 401) openGate('Clé refusée. Saisissez la clé à jour.');
@@ -3052,6 +3125,7 @@ function ouvrirClient(id) {
   suggestionsClient.cacher();
   clientModal.style.display = 'flex';
   verrouillerFond();
+  preparerPhotoFormulaire(c);
   if (!c) {
     clientNom.focus();
     proposerAdressesClient();
@@ -3067,61 +3141,125 @@ function fermerClient() {
 
 $('clientCancelBtn').addEventListener('click', fermerClient);
 
-/** Erreur d'écriture : la fenêtre reste ouverte, rien de ce qui a été tapé n'est perdu. */
-async function signalerEchecClient(err) {
-  if (err.status === 401) {
-    fermerClient();
-    openGate('Clé refusée. Saisissez la clé à jour.');
-    return;
+/**
+ * Envoie une opération client. Sans réseau, elle est mise en file d'attente
+ * et partira toute seule au retour de la connexion, comme pour les codes.
+ * Renvoie { ok, queued, data, err }.
+ */
+async function commitClient(op) {
+  op.ts = op.ts || Date.now();
+  try {
+    const data = await sendOp(op);
+    if (data && data.client) {
+      const i = clients.findIndex((c) => c.id === data.client.id);
+      if (i !== -1) clients[i] = { ...data.client, photoLocale: clients[i].photoLocale };
+      saveClientsCache();
+      renderList();
+    }
+    updateStatus();
+    return { ok: true, data };
+  } catch (err) {
+    if (err.status === 401) {
+      openGate('Clé refusée. Saisissez la clé à jour.');
+      return { ok: false, err };
+    }
+    const photosOff = err.payload && err.payload.error === 'photos_off';
+    if (!photosOff && (err.status === undefined || err.status >= 500 || err.status === 429)) {
+      enqueue(op);
+      return { ok: true, queued: true };
+    }
+    return { ok: false, err };
   }
-  const horsLigne = err.status === undefined;
-  await showDialog({
-    title: horsLigne ? 'Connexion requise' : 'Enregistrement refusé',
-    message: horsLigne
-      ? 'Les fiches clients ne sont enregistrées qu’avec du réseau. Réessayez une fois connecté.'
-      : err.message,
-    showCancel: false,
-    okText: 'Compris'
-  });
 }
+
+/** Nouvel identifiant de fiche, créé sur l'appareil : un rejeu ne duplique rien. */
+const nouvelId = () => getClientId().slice(0, 8) + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
 clientSaveBtn.addEventListener('click', async () => {
   if (isBusy) return;
 
-  const nom = clientNom.value.trim();
-  const adresse = clientAdresse.value.trim();
-  const info = clientInfo.value.trim();
-  const batiment = clientBatiment.value.trim();
-  const etage = clientEtage.value.trim();
-  const interphone = clientInterphone.value.trim();
+  const champs = {
+    nom: clientNom.value.trim(),
+    adresse: clientAdresse.value.trim(),
+    info: clientInfo.value.trim(),
+    batiment: clientBatiment.value.trim(),
+    etage: clientEtage.value.trim(),
+    interphone: clientInterphone.value.trim()
+  };
 
-  if (!nom) {
+  if (!champs.nom) {
     await showDialog({ title: 'Nom manquant', message: 'Renseignez au moins le nom du client.', showCancel: false, okText: 'Compris' });
     return;
   }
 
   isBusy = true;
   clientSaveBtn.disabled = true;
+  const creation = !clientEnCours;
+  const id = clientEnCours || nouvelId();
+  const photo = photoChoisie; // Blob, 'effacer' ou null (inchangée)
+
   try {
-    let data;
-    if (clientEnCours) {
-      data = await api('/api/clients/' + encodeURIComponent(clientEnCours), {
-        method: 'PATCH',
-        body: JSON.stringify({ nom, adresse, info, batiment, etage, interphone })
-      });
-      const idx = clients.findIndex((x) => x.id === clientEnCours);
-      if (idx !== -1 && data.client) clients[idx] = data.client;
+    // Affichage immédiat, avant toute réponse du serveur.
+    const now = Date.now();
+    if (creation) {
+      clients.push({ id, ...champs, createdAt: now, updatedAt: now, isMine: true, photo: null });
     } else {
-      const id = getClientId().slice(0, 8) + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-      data = await api('/api/clients', { method: 'POST', body: JSON.stringify({ id, nom, adresse, info, batiment, etage, interphone }) });
-      if (data.client) clients.push(data.client);
+      const i = clients.findIndex((c) => c.id === id);
+      if (i !== -1) clients[i] = { ...clients[i], ...champs, interphone: majInterphone(champs.interphone), updatedAt: now };
+    }
+    if (photo instanceof Blob) {
+      await photoEnAttente.mettre(id, photo);
+      const c = clients.find((x) => x.id === id);
+      if (c) c.photoLocale = true;
+    } else if (photo === 'effacer') {
+      await photoEnAttente.effacer(id);
+      const c = clients.find((x) => x.id === id);
+      if (c) { c.photo = null; c.photoLocale = false; }
     }
     saveClientsCache();
     fermerClient();
     renderList();
-    showToast(clientEnCours ? 'Fiche client mise à jour' : 'Client ajouté');
-  } catch (err) {
-    await signalerEchecClient(err);
+
+    const res = await commitClient({ kind: creation ? 'client-create' : 'client-patch', id, champs, ts: now });
+    if (!res.ok) {
+      await loadClients();
+      await showDialog({ title: 'Enregistrement refusé', message: res.err.message, showCancel: false, okText: 'Compris' });
+      return;
+    }
+
+    // La photo suit la fiche : jamais envoyée avant elle.
+    let horsLigne = Boolean(res.queued);
+    let echecPhoto = null;
+    if (photo instanceof Blob || photo === 'effacer') {
+      const op = { kind: photo === 'effacer' ? 'photo-delete' : 'photo-put', id, ts: now };
+      if (horsLigne) enqueue(op);
+      else {
+        const r = await commitClient(op);
+        if (r.queued) horsLigne = true;
+        else if (!r.ok) echecPhoto = r.err;
+      }
+    }
+
+    if (echecPhoto) {
+      // Fiche enregistrée, photo refusée : on ne garde pas une photo qui
+      // semblerait envoyée alors qu'elle ne l'est pas.
+      await photoEnAttente.effacer(id);
+      const c = clients.find((x) => x.id === id);
+      if (c) c.photoLocale = false;
+      saveClientsCache();
+      renderList();
+      await showDialog({
+        title: 'Fiche enregistrée, photo non envoyée',
+        message: echecPhoto.message,
+        showCancel: false,
+        okText: 'Compris'
+      });
+      return;
+    }
+
+    if (horsLigne) showToast('Hors ligne — envoi dès le retour du réseau');
+    else showToast(creation ? 'Client ajouté' : 'Fiche client mise à jour');
+    renderList();
   } finally {
     clientSaveBtn.disabled = false;
     isBusy = false;
@@ -3143,23 +3281,212 @@ clientDeleteBtn.addEventListener('click', async () => {
 
   isBusy = true;
   try {
-    await api('/api/clients/' + encodeURIComponent(c.id), { method: 'DELETE' });
     clients = clients.filter((x) => x.id !== c.id);
     saveClientsCache();
     fermerClient();
     renderList();
-    showToast('Fiche client supprimée');
-  } catch (err) {
-    await signalerEchecClient(err);
+    await photoEnAttente.effacer(c.id);
+    await oublierPhotoCache(c.id);
+
+    const res = await commitClient({ kind: 'client-delete', id: c.id });
+    if (!res.ok) {
+      await loadClients();
+      await showDialog({ title: 'Suppression refusée', message: res.err.message, showCancel: false, okText: 'Compris' });
+      return;
+    }
+    showToast(res.queued ? 'Hors ligne — suppression dès le retour du réseau' : 'Fiche client supprimée');
   } finally {
     isBusy = false;
   }
 });
 
+/* ------------------------------- photos -------------------------------- */
+
+// Photos prises mais pas encore envoyées : gardées dans IndexedDB, qui tient
+// des images sans risque de saturer le petit stockage de la liste.
+const photoEnAttente = (() => {
+  let base = null;
+  const ouvrir = () => {
+    if (!base) {
+      base = new Promise((ok, ko) => {
+        const req = indexedDB.open('chall_photos', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('attente');
+        req.onsuccess = () => ok(req.result);
+        req.onerror = () => ko(req.error);
+      });
+    }
+    return base;
+  };
+  const faire = async (mode, action) => {
+    try {
+      const db = await ouvrir();
+      return await new Promise((ok, ko) => {
+        const t = db.transaction('attente', mode);
+        const req = action(t.objectStore('attente'));
+        t.oncomplete = () => ok(req.result);
+        t.onerror = () => ko(t.error);
+      });
+    } catch {
+      return null; // stockage indisponible (navigation privée) : on continue sans
+    }
+  };
+  return {
+    lire: (id) => faire('readonly', (st) => st.get(id)),
+    mettre: (id, blob) => faire('readwrite', (st) => st.put(blob, id)),
+    effacer: (id) => faire('readwrite', (st) => st.delete(id))
+  };
+})();
+
+// Copie locale des photos déjà envoyées : la fiche s'affiche même hors ligne.
+const PHOTOS_CACHE = 'chall-photos';
+const clePhoto = (id, version) => '/photo-cache/' + encodeURIComponent(id) + '?v=' + version;
+
+async function oublierPhotoCache(id, garder = null) {
+  try {
+    const cache = await caches.open(PHOTOS_CACHE);
+    for (const req of await cache.keys()) {
+      const url = new URL(req.url);
+      if (url.pathname === '/photo-cache/' + encodeURIComponent(id) && url.search !== '?v=' + garder) {
+        await cache.delete(req);
+      }
+    }
+  } catch {
+    /* pas de Cache API : rien à nettoyer */
+  }
+}
+
+/** Envoie la photo en attente d'une fiche. Sans photo en attente, rien à faire. */
+async function envoyerPhoto(id) {
+  const blob = await photoEnAttente.lire(id);
+  if (!blob) return { ok: true };
+  const data = await api('/api/photos/' + encodeURIComponent(id), { method: 'PUT', body: blob, type: blob.type || 'image/jpeg' });
+  // Envoyée : elle passe de l'attente à la copie locale, sous sa version.
+  if (data && data.client && data.client.photo) {
+    try {
+      const cache = await caches.open(PHOTOS_CACHE);
+      await cache.put(clePhoto(id, data.client.photo), new Response(blob, { headers: { 'Content-Type': blob.type } }));
+      await oublierPhotoCache(id, data.client.photo);
+    } catch {
+      /* pas de copie locale : elle sera retéléchargée */
+    }
+  }
+  await photoEnAttente.effacer(id);
+  const c = clients.find((x) => x.id === id);
+  if (c) c.photoLocale = false;
+  return data;
+}
+
+/** Adresse affichable de la photo d'un client, ou null s'il n'en a pas. */
+async function urlPhoto(c) {
+  const locale = await photoEnAttente.lire(c.id);
+  if (locale) return URL.createObjectURL(locale);
+  if (!c.photo) return null;
+
+  let cache = null;
+  try {
+    cache = await caches.open(PHOTOS_CACHE);
+    const trouvee = await cache.match(clePhoto(c.id, c.photo));
+    if (trouvee) return URL.createObjectURL(await trouvee.blob());
+  } catch {
+    cache = null;
+  }
+
+  try {
+    const res = await api('/api/photos/' + encodeURIComponent(c.id), { brut: true });
+    const blob = await res.blob();
+    if (cache) {
+      await cache.put(clePhoto(c.id, c.photo), new Response(blob, { headers: { 'Content-Type': blob.type } }));
+      await oublierPhotoCache(c.id, c.photo);
+    }
+    return URL.createObjectURL(blob);
+  } catch {
+    return null; // hors ligne et jamais vue sur cet appareil
+  }
+}
+
+/**
+ * Réduit la photo avant envoi : 1280 px au plus grand côté, JPEG, en
+ * baissant la qualité jusqu'à passer sous 200 Ko. Une photo de téléphone
+ * de 4 Mo tombe ainsi vers 150 Ko.
+ */
+async function compresserPhoto(fichier) {
+  const image = await new Promise((ok, ko) => {
+    const img = new Image();
+    img.onload = () => ok(img);
+    img.onerror = () => ko(new Error('Image illisible'));
+    img.src = URL.createObjectURL(fichier);
+  });
+  const echelle = Math.min(1, 1280 / Math.max(image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(image.naturalWidth * echelle);
+  canvas.height = Math.round(image.naturalHeight * echelle);
+  canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+  URL.revokeObjectURL(image.src);
+
+  let blob = null;
+  for (const qualite of [0.75, 0.6, 0.45, 0.35]) {
+    blob = await new Promise((ok) => canvas.toBlob(ok, 'image/jpeg', qualite));
+    if (blob && blob.size < 200 * 1024) break;
+  }
+  return blob;
+}
+
+// Photo choisie dans le formulaire ouvert : Blob, 'effacer', ou null (inchangée).
+let photoChoisie = null;
+const clientPhotoInput = $('clientPhotoInput');
+const clientPhotoApercu = $('clientPhotoApercu');
+const clientPhotoBtn = $('clientPhotoBtn');
+const clientPhotoSuppr = $('clientPhotoSuppr');
+
+function afficherApercu(url) {
+  if (clientPhotoApercu.dataset.url) URL.revokeObjectURL(clientPhotoApercu.dataset.url);
+  clientPhotoApercu.dataset.url = url || '';
+  clientPhotoApercu.src = url || '';
+  clientPhotoApercu.hidden = !url;
+  clientPhotoSuppr.hidden = !url;
+  clientPhotoBtn.textContent = url ? '📷 Changer la photo' : '📷 Ajouter une photo';
+}
+
+async function preparerPhotoFormulaire(c) {
+  photoChoisie = null;
+  clientPhotoInput.value = '';
+  afficherApercu(null);
+  if (c) {
+    const url = await urlPhoto(c);
+    // Le formulaire a pu être refermé ou changé pendant le chargement.
+    if (clientModal.style.display === 'flex' && clientEnCours === c.id && photoChoisie === null) afficherApercu(url);
+    else if (url) URL.revokeObjectURL(url);
+  }
+}
+
+clientPhotoBtn.addEventListener('click', () => clientPhotoInput.click());
+
+clientPhotoInput.addEventListener('change', async () => {
+  const fichier = clientPhotoInput.files && clientPhotoInput.files[0];
+  if (!fichier) return;
+  try {
+    clientPhotoBtn.textContent = '⏳ Préparation...';
+    photoChoisie = await compresserPhoto(fichier);
+    afficherApercu(URL.createObjectURL(photoChoisie));
+  } catch {
+    photoChoisie = null;
+    afficherApercu(null);
+    showToast('Photo illisible');
+  }
+});
+
+clientPhotoSuppr.addEventListener('click', () => {
+  photoChoisie = 'effacer';
+  afficherApercu(null);
+});
+
 /* ------------------------------ démarrage ------------------------------- */
 
 window.addEventListener('online', async () => {
-  if (await flushOutbox()) await loadData({ silent: true });
+  if (await flushOutbox()) {
+    await loadData({ silent: true });
+    await loadClients();
+  }
 });
 window.addEventListener('offline', () => updateStatus());
 
@@ -3181,7 +3508,10 @@ document.addEventListener('visibilitychange', async () => {
       /* position indisponible : on garde l'affichage précédent */
     }
   }
-  if (await flushOutbox()) await loadData({ silent: true });
+  if (await flushOutbox()) {
+    await loadData({ silent: true });
+    await loadClients();
+  }
 });
 
 if ('serviceWorker' in navigator) {
@@ -3206,6 +3536,7 @@ if ('serviceWorker' in navigator) {
 
   await flushOutbox();
   await loadData();
+  await loadClients();
   trackDeviceInstallation();
   proposerTuto();
 })();

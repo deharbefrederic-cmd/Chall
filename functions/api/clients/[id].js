@@ -115,5 +115,9 @@ export async function onRequestDelete(context) {
   }
 
   await db.prepare('DELETE FROM clients WHERE id = ?1').bind(id).run();
+  // La photo part avec la fiche.
+  if (row.photo && context.env.PHOTOS) {
+    context.waitUntil(context.env.PHOTOS.delete('clients/' + id).catch(() => {}));
+  }
   return json({ ok: true });
 }

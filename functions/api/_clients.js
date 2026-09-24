@@ -27,6 +27,7 @@ export async function assurerTable(db) {
          batiment   TEXT,
          etage      TEXT,
          interphone TEXT,
+         photo      INTEGER,
          created_at INTEGER NOT NULL,
          updated_at INTEGER NOT NULL,
          author     TEXT,
@@ -37,9 +38,9 @@ export async function assurerTable(db) {
   ]);
   // Table créée avant l'arrivée des champs structurés : on les ajoute.
   // Une colonne déjà présente fait échouer l'ALTER, ce qui est sans gravité.
-  for (const col of ['batiment', 'etage', 'interphone']) {
+  for (const [col, type] of [['batiment', 'TEXT'], ['etage', 'TEXT'], ['interphone', 'TEXT'], ['photo', 'INTEGER']]) {
     try {
-      await db.prepare(`ALTER TABLE clients ADD COLUMN ${col} TEXT`).run();
+      await db.prepare(`ALTER TABLE clients ADD COLUMN ${col} ${type}`).run();
     } catch {
       /* colonne déjà là */
     }
@@ -47,7 +48,7 @@ export async function assurerTable(db) {
   tablePrete = true;
 }
 
-export const COLONNES = 'id, nom, adresse, info, batiment, etage, interphone, created_at, updated_at, author';
+export const COLONNES = 'id, nom, adresse, info, batiment, etage, interphone, photo, created_at, updated_at, author';
 
 /** « b » -> « B », « bat. c » -> « C » : une seule écriture pour toute l'équipe. */
 export function normBatiment(value) {
@@ -116,6 +117,8 @@ export function toClient(row, me) {
     batiment: row.batiment || '',
     etage: row.etage || '',
     interphone: row.interphone || '',
+    // Version de la photo (date d'envoi), null s'il n'y en a pas.
+    photo: row.photo || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     parQui: row.par_qui || null,
