@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — NOM en majuscules';
+const VERSION = '24/09 — détecteur de prénom';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -2774,6 +2774,16 @@ const clientSaveBtn = $('clientSaveBtn');
 
 const saveClientsCache = () => writeJson(CLIENTS_CACHE_KEY, clients);
 
+// Aperçu sous le champ Nom : on voit comment le nom sera enregistré, et on
+// corrige tout de suite si le prénom a été mal deviné.
+const clientNomApercu = $('clientNomApercu');
+function majApercuNom() {
+  const saisi = clientNom.value.trim().split(/\s+/).join(' ');
+  const final = formaterNom(saisi);
+  clientNomApercu.textContent = saisi && final !== saisi ? 'Sera enregistré : ' + final : '';
+}
+clientNom.addEventListener('input', majApercuNom);
+
 // Prédiction d'adresse, la même que pour les codes.
 const suggestionsClient = brancherSuggestions(clientAdresse, clientInterphone);
 
@@ -2872,46 +2882,126 @@ function detailsClient(c) {
 const CIVILITES = /^(m|mr|mme|mlle|melle|dr|me)\.?$/i;
 
 /**
- * Nom de famille déduit de la fiche, pour le classement alphabétique.
- * La convention de l'équipe est « NOM Prénom » :
- * 1. les mots en MAJUSCULES quand le reste ne l'est pas : « BENESTANG Audrey »
- *    -> BENESTANG, et les anciennes fiches « Josiane MEJIDO » -> MEJIDO ;
- * 2. sinon, le nom tel qu'il est écrit, premier mot en tête :
- *    « Monge Patricia » -> Monge.
- * L'interphone n'est pas utilisé : il porte parfois un autre nom que celui
- * du client.
+ * Nom de famille, pour le classement alphabétique : la partie « nom » du
+ * découpage ci-dessus. L'interphone n'est pas utilisé : il porte parfois un
+ * autre nom que celui du client.
  */
 function nomDeFamille(c) {
-  const nom = formaterNom(c.nom).split(/\s+/).filter((m) => m && !CIVILITES.test(m));
-  const estMaj = (m) => /[A-ZÀ-Þ]/.test(m) && m === m.toUpperCase();
-  const maj = nom.filter(estMaj);
-  if (maj.length && maj.length < nom.length) return maj.join(' ');
-  return nom.join(' ');
+  return decouperNom(c.nom).nom.join(' ');
 }
 
 const capitaliser = (mot) =>
   mot.toLowerCase().replace(/(^|[-'’])(\p{L})/gu, (m, sep, l) => sep + l.toUpperCase());
 
+// Prénoms courants en France (et à Nice : italiens, portugais, maghrébins…),
+// sans accents. Sert à repérer le prénom quand l'écriture ne le dit pas.
+const PRENOMS = new Set((
+  'aaron abdallah abdel abdelkader abdou abdoulaye abel abigail adam adele adeline adil adriana ' +
+  'adrien adrienne agathe agnes ahmed aicha aida aime aimee alain alais alan alban albert alberto ' +
+  'albin alda aldo alessandra alessandro alessia alex alexandra alexandre alexia alexis alfred ' +
+  'alfredo ali alice alicia aline alix allan alma amandine amaury ambre amel amelia amelie amina ' +
+  'amine amir amira anabelle anais anastasia andre andrea andreas andree andy ange angela angele ' +
+  'angelina angelique angelo anissa anita anna annabelle anne anne-marie anne-sophie annette ' +
+  'annick annie anouk anthony antoine antoinette antonella antonio apolline arielle arlette armand ' +
+  'armelle arnaud arthur astrid athena aubin aude audrey augustin aurele aurelie aurelien aurore ' +
+  'axel axelle aya aymeric aziz badr baptiste barbara basile bastien beatrice benedicte benjamin ' +
+  'benoit berenice bernadette bernard bertrand betty bianca blanche blandine boris brahim brice ' +
+  'brigitte bruno camille capucine carine carla carlo carlos carmen carole caroline catherine ' +
+  'cecile cedric celeste celia celine chantal charles charlie charline charlotte chiara chloe ' +
+  'christel christelle christian christiane christine christophe claire clara clarisse claude ' +
+  'claudette claudia claudine clemence clement cleo clotilde colette colin coline constance ' +
+  'coralie corentin corinne cristina cyril cyrille dalia damien daniel daniela daniele danielle ' +
+  'dany david deborah delphine denis denise diana diane didier dimitri dina djamel domenico ' +
+  'dominique dora dorian doriane dorothee driss dylan edgar edith edmond edouard elena eleonore ' +
+  'eliane elias elie eliott elisa elisabeth elise ella elodie eloise elsa elvire emeline emile ' +
+  'emilie emilien emilio emma emmanuel emmanuelle enzo eric erica erika ernest estelle esther ' +
+  'ethan etienne eugene eugenie eva evan eve evelyne ezio fabien fabienne fabio fabrice fanny ' +
+  'farid farida fatiha fatima fatou faustine felicie felix ferdinand fernand fernanda fernande ' +
+  'fernando filipe flavie flavien flora florence florent florian france francesca francesco ' +
+  'francine francis francisco franck francois francoise frederic frederique gabin gabriel ' +
+  'gabriella gabrielle gael gaelle gaetan gaston gauthier genevieve geoffrey georges georgette ' +
+  'gerald geraldine gerard germain germaine ghislaine gianni gilbert gilberte gilles gina ginette ' +
+  'giovanni gisele giulia giuseppe gregoire gregory guillaume guy guylaine habib hafid hakim ' +
+  'halima hamid hamza hanna hannah hassan hector helene heloise henri henriette herve hicham hind ' +
+  'hortense hubert hugo hugues ibrahim ida ilan ilyes imane ines ingrid irene iris isabel isabelle ' +
+  'ismael issa ivan jacqueline jacques jade jamel jamila janine jason jean jean-baptiste ' +
+  'jean-claude jean-francois jean-jacques jean-louis jean-luc jean-marc jean-marie jean-michel ' +
+  'jean-paul jean-philippe jean-pierre jeanne jeannine jennifer jeremie jeremy jerome jessica ' +
+  'jessy joachim joana joao jocelyne joel joelle johan johanna johnny jonathan jordan jose josee ' +
+  'joseph josephine josette josiane joss judith jules julia julie julien juliette justin justine ' +
+  'kader kamel karim karima karine katia kelly kenza kevin khadija killian kim laetitia lamia lana ' +
+  'laura laure laurence laurent lea leila lena leo leon leonard leonie leopold liam liliane lilou ' +
+  'lina linda line lionel lisa lise lola lorenzo lorraine louis louisa louise luc luca lucas ' +
+  'lucette lucia lucie lucien lucienne lucile ludivine ludovic luigi luis luisa lydia lydie ' +
+  'madeleine mael maelle magali maite malik malika manon manuel manuela manuella marc marceau ' +
+  'marcel marcelle marcelline marco margaux margot maria mariam mariama marianne marie ' +
+  'marie-christine marie-claude marie-france marie-helene marie-laure marie-louise marie-pierre ' +
+  'marie-therese mariella marielle marina marine mario marion marius marjorie marleine marlene ' +
+  'marthe martial martin martine maryse matheo mathias mathieu mathilde matteo matthieu maud ' +
+  'maurice mauricette maxence maxime maximilien mehdi melanie melissa melodie mia michael michel ' +
+  'michele micheline mickael mila milan mireille mohamed mohammed monique morgan morgane mounir ' +
+  'mourad muriel myriam nabil nacer nadege nadia nadine naima nais najat nancy naomi natacha ' +
+  'nathalie nathan nelly nicolas nicole nina ninon noah noe noel noelle noemie nolan nora norbert ' +
+  'nordine oceane octave odette odile olga olivia olivier omar ophelie oscar paola paolo pascal ' +
+  'pascale patrice patricia patrick paul paula paule pauline pedro penelope perrine philippe ' +
+  'pierre pierrette pietro priscilla quentin rachel rachid rafael raphael raphaelle rayan raymond ' +
+  'raymonde rebecca regine regis remi remy renaud rene renee richard rita robert roberta roberto ' +
+  'robin rodolphe rodrigue roger roland romain romane romeo rosa rosalie rose rosine roxane ruben ' +
+  'ryan sabine sabrina sacha said saida salim salma salome salvatore samia samir samira samuel ' +
+  'sandra sandrine sara sarah sebastien serena serge sergio severine sharon simon simone smaranda ' +
+  'sofia sonia sophie stella stephane stephanie steve steven suzanne sylvain sylvia sylvie tatiana ' +
+  'terence teresa thais theo theodore therese thibault thibaut thierry thomas timothee tiphaine ' +
+  'tom tristan ugo ulysse valentin valentine valerie vanessa vera veronique victoire victor ' +
+  'victoria vincent violaine violette virginie viviane vivien vladimir walid william xavier yann ' +
+  'yannick yasmine yassine yolande youcef younes youssef yves yvette yvon yvonne zakaria zina zoe ' +
+  'zohra'
+).split(' '));
+
+const sansAccent = (m) => m.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+/** Prénom connu, y compris composé : « jean-pierre », « marie-claire ». */
+const estPrenom = (m) => sansAccent(m).split('-').every((p) => PRENOMS.has(p));
+
 /**
- * Nom au format « NOM Prénom », même règle que le serveur. Appliquée aussi à
- * l'affichage : les fiches déjà enregistrées ont tout de suite la même écriture.
+ * Nom au format « NOM Prénom », remis dans cet ordre. Appliqué à la saisie
+ * et à l'affichage : les fiches déjà enregistrées ont la même écriture.
+ * 1. des mots en MAJUSCULES à côté d'autres qui ne le sont pas : ce sont
+ *    le nom (« Josiane MEJIDO » -> « MEJIDO Josiane ») ;
+ * 2. sinon, les prénoms connus en fin de nom (« monge patricia », « luc
+ *    liagre danielle ») ou, à défaut, le premier mot s'il est un prénom
+ *    connu (« DANIELLE LUC LIAGRE » -> « LUC LIAGRE Danielle ») ;
+ * 3. sinon, la convention de l'équipe : premier mot = nom. Un nom tout en
+ *    majuscules sans prénom reconnu est laissé tel quel.
+ * Il reste toujours au moins un mot pour le nom.
  */
-function formaterNom(texte) {
+function decouperNom(texte) {
   const mots = (texte || '').trim().split(/\s+/).filter(Boolean);
+  const civilites = mots.filter((m) => CIVILITES.test(m));
   const utiles = mots.filter((m) => !CIVILITES.test(m));
   const estMaj = (m) => /\p{Lu}/u.test(m) && m === m.toUpperCase();
-  const dejaNom = utiles.some(estMaj) && !utiles.every(estMaj);
-  // Tout en majuscules : impossible de savoir quel mot est le nom, on n'y touche pas.
-  if (utiles.length > 1 && utiles.every(estMaj)) return mots.join(' ');
-  let premier = true;
-  return mots
-    .map((m) => {
-      if (CIVILITES.test(m)) return m;
-      const estNom = dejaNom ? estMaj(m) : premier;
-      premier = false;
-      return estNom ? m.toUpperCase() : capitaliser(m);
-    })
-    .join(' ');
+
+  if (utiles.length <= 1) return { civilites, nom: utiles, prenom: [], sur: true };
+
+  if (utiles.some(estMaj) && !utiles.every(estMaj)) {
+    return { civilites, nom: utiles.filter(estMaj), prenom: utiles.filter((m) => !estMaj(m)), sur: true };
+  }
+
+  // Prénoms en fin de nom, autant qu'il y en a (« marie claire »).
+  let fin = utiles.length;
+  while (fin > 1 && estPrenom(utiles[fin - 1])) fin--;
+  if (fin < utiles.length) return { civilites, nom: utiles.slice(0, fin), prenom: utiles.slice(fin), sur: true };
+
+  // Prénom en tête : ancienne écriture « Prénom NOM ».
+  if (estPrenom(utiles[0])) return { civilites, nom: utiles.slice(1), prenom: [utiles[0]], sur: true };
+
+  return { civilites, nom: [utiles[0]], prenom: utiles.slice(1), sur: false };
+}
+
+function formaterNom(texte) {
+  const d = decouperNom(texte);
+  const tout = [...d.civilites, ...d.nom, ...d.prenom];
+  // Tout en majuscules sans prénom reconnu : on ne devine pas, on n'y touche pas.
+  if (!d.sur && tout.every((m) => /\p{Lu}/u.test(m) && m === m.toUpperCase())) return (texte || '').trim().split(/\s+/).join(' ');
+  return [...d.civilites, ...d.nom.map((m) => m.toUpperCase()), ...d.prenom.map(capitaliser)].join(' ');
 }
 
 /** Clé de tri : nom de famille, puis nom complet pour départager. */
@@ -3157,6 +3247,7 @@ function ouvrirClient(id) {
 
   $('clientModalTitle').textContent = c ? 'Fiche client' : 'Nouveau client';
   clientNom.value = c ? c.nom : '';
+  majApercuNom();
   clientAdresse.value = c ? c.adresse : '';
   clientInfo.value = c ? c.info : '';
   clientBatiment.value = c ? c.batiment || '' : '';
@@ -3222,7 +3313,7 @@ clientSaveBtn.addEventListener('click', async () => {
   if (isBusy) return;
 
   const champs = {
-    nom: clientNom.value.trim(),
+    nom: formaterNom(clientNom.value),
     adresse: clientAdresse.value.trim(),
     info: clientInfo.value.trim(),
     batiment: clientBatiment.value.trim(),

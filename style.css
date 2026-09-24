@@ -656,3 +656,14 @@ textarea:focus-visible {
 .photo-actions button[hidden] {
   display: none;
 }
+
+.nom-apercu {
+  font-size: 13px;
+  color: #7dd3fc;
+  margin: -10px 0 12px;
+  min-height: 0;
+}
+
+.nom-apercu:empty {
+  display: none;
+}
