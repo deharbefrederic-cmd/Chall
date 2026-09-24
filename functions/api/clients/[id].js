@@ -2,7 +2,7 @@ import {
   json, sanitizeText, isValidId, clientId, readJson, rateLimit, ipBucket, formatAddress, deviceNom, estAdmin
 } from '../_lib.js';
 import {
-  assurerTable, sanitizeInfo, sanitizeOptionnel, toClient, normBatiment, normEtage, normInterphone,
+  assurerTable, sanitizeInfo, sanitizeOptionnel, toClient, normBatiment, normEtage, normInterphone, normNom,
   COLONNES, MAX_NOM, MAX_ADRESSE
 } from '../_clients.js';
 
@@ -50,8 +50,9 @@ export async function onRequestPatch(context) {
   let interphone = row.interphone || '';
 
   if (body.nom !== undefined) {
-    nom = sanitizeText(body.nom, MAX_NOM);
-    if (!nom) return json({ error: 'invalid_nom', message: 'Nom manquant ou trop long.' }, 400);
+    const brut = sanitizeText(body.nom, MAX_NOM);
+    if (!brut) return json({ error: 'invalid_nom', message: 'Nom manquant ou trop long.' }, 400);
+    nom = normNom(brut);
   }
   if (body.adresse !== undefined) {
     const brute = sanitizeOptionnel(body.adresse, MAX_ADRESSE);

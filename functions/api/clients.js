@@ -1,6 +1,6 @@
 import { json, sanitizeText, isValidId, clientId, readJson, rateLimit, ipBucket, formatAddress, deviceNom } from './_lib.js';
 import {
-  assurerTable, sanitizeInfo, sanitizeOptionnel, toClient, normBatiment, normEtage, normInterphone,
+  assurerTable, sanitizeInfo, sanitizeOptionnel, toClient, normBatiment, normEtage, normInterphone, normNom,
   COLONNES, MAX_NOM, MAX_ADRESSE
 } from './_clients.js';
 
@@ -39,8 +39,9 @@ export async function onRequestPost(context) {
   const body = await readJson(request);
   if (!body) return json({ error: 'bad_request', message: 'Corps de requête illisible.' }, 400);
 
-  const nom = sanitizeText(body.nom, MAX_NOM);
-  if (!nom) return json({ error: 'invalid_nom', message: 'Nom manquant ou trop long.' }, 400);
+  const brut = sanitizeText(body.nom, MAX_NOM);
+  if (!brut) return json({ error: 'invalid_nom', message: 'Nom manquant ou trop long.' }, 400);
+  const nom = normNom(brut);
 
   const adresseBrute = sanitizeOptionnel(body.adresse, MAX_ADRESSE);
   if (adresseBrute === null) return json({ error: 'invalid_adresse', message: 'Adresse trop longue.' }, 400);

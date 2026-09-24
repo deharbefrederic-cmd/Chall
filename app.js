@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — tri NOM Prénom';
+const VERSION = '24/09 — NOM en majuscules';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -2882,11 +2882,36 @@ const CIVILITES = /^(m|mr|mme|mlle|melle|dr|me)\.?$/i;
  * du client.
  */
 function nomDeFamille(c) {
-  const nom = (c.nom || '').split(/\s+/).filter((m) => m && !CIVILITES.test(m));
+  const nom = formaterNom(c.nom).split(/\s+/).filter((m) => m && !CIVILITES.test(m));
   const estMaj = (m) => /[A-ZÀ-Þ]/.test(m) && m === m.toUpperCase();
   const maj = nom.filter(estMaj);
   if (maj.length && maj.length < nom.length) return maj.join(' ');
   return nom.join(' ');
+}
+
+const capitaliser = (mot) =>
+  mot.toLowerCase().replace(/(^|[-'’])(\p{L})/gu, (m, sep, l) => sep + l.toUpperCase());
+
+/**
+ * Nom au format « NOM Prénom », même règle que le serveur. Appliquée aussi à
+ * l'affichage : les fiches déjà enregistrées ont tout de suite la même écriture.
+ */
+function formaterNom(texte) {
+  const mots = (texte || '').trim().split(/\s+/).filter(Boolean);
+  const utiles = mots.filter((m) => !CIVILITES.test(m));
+  const estMaj = (m) => /\p{Lu}/u.test(m) && m === m.toUpperCase();
+  const dejaNom = utiles.some(estMaj) && !utiles.every(estMaj);
+  // Tout en majuscules : impossible de savoir quel mot est le nom, on n'y touche pas.
+  if (utiles.length > 1 && utiles.every(estMaj)) return mots.join(' ');
+  let premier = true;
+  return mots
+    .map((m) => {
+      if (CIVILITES.test(m)) return m;
+      const estNom = dejaNom ? estMaj(m) : premier;
+      premier = false;
+      return estNom ? m.toUpperCase() : capitaliser(m);
+    })
+    .join(' ');
 }
 
 /** Clé de tri : nom de famille, puis nom complet pour départager. */
@@ -2902,7 +2927,7 @@ function buildClientCard(c) {
   const info = el('div', 'card-info');
   const titre = el('div', 'code-row');
   titre.style.marginTop = '0';
-  titre.appendChild(el('span', 'client-nom', c.nom));
+  titre.appendChild(el('span', 'client-nom', formaterNom(c.nom)));
   if (c.updatedAt && Date.now() - c.updatedAt < RECENT_MS) titre.appendChild(el('span', 'badge-tag badge-recent', 'MAJ'));
   if (c.photo || c.photoLocale) titre.appendChild(el('span', 'badge-tag badge-photo', '📷'));
   if (idsEnAttente().has(c.id)) titre.appendChild(el('span', 'badge-tag badge-attente', '⏳ À envoyer'));
@@ -2953,7 +2978,7 @@ function montrerFicheClient(id) {
   modal.style.display = 'flex';
   const box = el('div', 'modal-content');
 
-  box.appendChild(el('h3', 'fiche-nom', c.nom));
+  box.appendChild(el('h3', 'fiche-nom', formaterNom(c.nom)));
   if (c.adresse) box.appendChild(el('div', 'fiche-adresse', '📍 ' + c.adresse));
 
   const grille = el('div', 'fiche-grille');
@@ -3220,10 +3245,10 @@ clientSaveBtn.addEventListener('click', async () => {
     // Affichage immédiat, avant toute réponse du serveur.
     const now = Date.now();
     if (creation) {
-      clients.push({ id, ...champs, createdAt: now, updatedAt: now, isMine: true, photo: null });
+      clients.push({ id, ...champs, nom: formaterNom(champs.nom), createdAt: now, updatedAt: now, isMine: true, photo: null });
     } else {
       const i = clients.findIndex((c) => c.id === id);
-      if (i !== -1) clients[i] = { ...clients[i], ...champs, interphone: majInterphone(champs.interphone), updatedAt: now };
+      if (i !== -1) clients[i] = { ...clients[i], ...champs, nom: formaterNom(champs.nom), interphone: majInterphone(champs.interphone), updatedAt: now };
     }
     if (photo instanceof Blob) {
       await photoEnAttente.mettre(id, photo);
@@ -3291,7 +3316,7 @@ clientDeleteBtn.addEventListener('click', async () => {
 
   const ok = await showDialog({
     title: 'Confirmer la suppression',
-    message: `Supprimer la fiche de « ${c.nom} » ?`,
+    message: `Supprimer la fiche de « ${formaterNom(c.nom)} » ?`,
     okText: 'Supprimer',
     cancelText: 'Annuler'
   });

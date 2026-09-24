@@ -68,6 +68,36 @@ export function normEtage(value) {
   return brut;
 }
 
+const CIVILITES = /^(m|mr|mme|mlle|melle|dr|me)\.?$/i;
+const capitaliser = (mot) =>
+  mot.toLowerCase().replace(/(^|[-'’])(\p{L})/gu, (m, sep, l) => sep + l.toUpperCase());
+
+/**
+ * Nom du client au format de l'équipe, « NOM Prénom » :
+ * - des mots déjà en MAJUSCULES à côté d'autres qui ne le sont pas sont
+ *   pris pour le nom et gardés tels quels (« LUC LIAGRE danielle » ->
+ *   « LUC LIAGRE Danielle ») ;
+ * - sinon le premier mot est le nom (« Parizot marleine » -> « PARIZOT Marleine »).
+ * Les civilités restent telles quelles. Même règle côté application.
+ */
+export function normNom(value) {
+  const mots = value.split(' ');
+  const utiles = mots.filter((m) => !CIVILITES.test(m));
+  const estMaj = (m) => /\p{Lu}/u.test(m) && m === m.toUpperCase();
+  const dejaNom = utiles.some(estMaj) && !utiles.every(estMaj);
+  // Tout en majuscules : impossible de savoir quel mot est le nom, on n'y touche pas.
+  if (utiles.length > 1 && utiles.every(estMaj)) return mots.join(' ');
+  let premier = true;
+  return mots
+    .map((m) => {
+      if (CIVILITES.test(m)) return m;
+      const estNom = dejaNom ? estMaj(m) : premier;
+      premier = false;
+      return estNom ? m.toUpperCase() : capitaliser(m);
+    })
+    .join(' ');
+}
+
 /**
  * Interphone : nom en majuscules comme sur les plaques (« Mejido » -> « MEJIDO »),
  * civilités laissées telles quelles (« Mme DUPONT »).
