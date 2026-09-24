@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — interphone majuscules';
+const VERSION = '24/09 — vibration appui long';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -410,19 +410,16 @@ function buildCard(item) {
 function appuiLong(bouton, action, duree = 600) {
   bouton.style.transition = `background-color ${duree}ms linear, transform 120ms`;
   let minuteur = null;
-  let declenche = false;
 
   const armer = (e) => {
     e.stopPropagation();
-    declenche = false;
     bouton.style.backgroundColor = '#2563eb'; // remplissage progressif
     minuteur = setTimeout(() => {
-      declenche = true;
       minuteur = null;
       bouton.style.backgroundColor = '';
       bouton.style.transform = 'scale(0.9)';
       setTimeout(() => { bouton.style.transform = ''; }, 120);
-      if (navigator.vibrate) navigator.vibrate(20);
+      if (navigator.vibrate) navigator.vibrate(30);
       action();
     }, duree);
   };
@@ -433,17 +430,25 @@ function appuiLong(bouton, action, duree = 600) {
     bouton.style.backgroundColor = '';
   };
 
+  // Relâché avant la fin : on explique quoi faire.
+  const relacher = () => {
+    if (minuteur !== null) showToast('Appui long pour modifier');
+    desarmer();
+  };
+
   bouton.addEventListener('pointerdown', armer);
-  bouton.addEventListener('pointerup', desarmer);
+  bouton.addEventListener('pointerup', relacher);
   bouton.addEventListener('pointerleave', desarmer);
   bouton.addEventListener('pointercancel', desarmer);
   bouton.addEventListener('contextmenu', (e) => e.preventDefault());
 
-  bouton.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (!declenche) showToast('Appui long pour modifier');
-    declenche = false;
-  });
+  // Sans ceci, Android lance son propre appui long vers une demi-seconde,
+  // avec sa vibration à lui : elle tombait avant la nôtre, au mauvais moment.
+  // Seule notre vibration reste, à l'instant où la fiche s'ouvre.
+  bouton.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+
+  // Le clic ne doit jamais remonter à la carte (qui ouvrirait la fiche).
+  bouton.addEventListener('click', (e) => e.stopPropagation());
 }
 
 function majBoutonEffacer() {
