@@ -67,9 +67,17 @@ export function normEtage(value) {
   return brut;
 }
 
-/** Interphone : nom ou numéro tel qu'affiché sur la plaque, espaces écrasés. */
+/**
+ * Interphone : nom en majuscules comme sur les plaques (« Mejido » -> « MEJIDO »),
+ * civilités laissées telles quelles (« Mme DUPONT »).
+ */
 export function normInterphone(value) {
-  return sanitizeOptionnel(value, MAX_INTERPHONE);
+  const v = sanitizeOptionnel(value, MAX_INTERPHONE);
+  if (!v) return v;
+  return v
+    .split(' ')
+    .map((mot) => (/^(m|mr|mme|mlle|melle|dr|me)\.?$/i.test(mot) ? mot : mot.toUpperCase()))
+    .join(' ');
 }
 
 /**

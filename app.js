@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — fiche client complète';
+const VERSION = '24/09 — interphone majuscules';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -407,8 +407,8 @@ function buildCard(item) {
  * Appui long : évite d'ouvrir une fiche en modification par erreur.
  * Le bouton se remplit de bleu pendant l'appui ; un appui bref explique quoi faire.
  */
-function appuiLong(bouton, action) {
-  bouton.style.transition = 'background-color 600ms linear, transform 120ms';
+function appuiLong(bouton, action, duree = 600) {
+  bouton.style.transition = `background-color ${duree}ms linear, transform 120ms`;
   let minuteur = null;
   let declenche = false;
 
@@ -424,7 +424,7 @@ function appuiLong(bouton, action) {
       setTimeout(() => { bouton.style.transform = ''; }, 120);
       if (navigator.vibrate) navigator.vibrate(20);
       action();
-    }, 600);
+    }, duree);
   };
 
   const desarmer = () => {
@@ -2768,6 +2768,22 @@ function codesPourClient(c) {
   if (!fiches.length) {
     fiches = records.filter((r) => /\d/.test(r.address || '') && correspondAdresse(r.address, c.adresse));
   }
+  if (!fiches.length) {
+    // Dernier recours : même numéro et même nom de voie, type de voie ignoré.
+    // « 190 Route de Pessicart » retrouve « 190 Avenue de Pessicart ».
+    // L'adresse de la fiche est alors affichée, pour qu'on voie l'écart.
+    const a = coreTokens(c.adresse);
+    if (a.number && a.words.length) {
+      fiches = records
+        .filter((r) => {
+          const b = coreTokens(r.address);
+          if (b.number !== a.number || !b.words.length) return false;
+          const communs = a.words.filter((w) => b.words.includes(w));
+          return communs.length && communs.length === Math.min(a.words.length, b.words.length);
+        })
+        .map((r) => ({ ...r, approx: true }));
+    }
+  }
   if (fiches.length > 1) {
     const cle = searchKey(c.adresse);
     const exactes = fiches.filter((r) => searchKey(r.address) === cle);
@@ -2785,14 +2801,26 @@ function codesPourClient(c) {
 function pastillesCode(c) {
   const fiches = codesPourClient(c);
   return fiches.map((f) =>
-    el('div', 'client-code', '🔑 ' + f.code + (f.hs ? ' (HS)' : '') + (fiches.length > 1 ? ' · ' + f.address : ''))
+    el('div', 'client-code', '🔑 ' + f.code + (f.hs ? ' (HS)' : '') + (fiches.length > 1 || f.approx ? ' · ' + f.address : ''))
   );
+}
+
+/**
+ * Nom d'interphone en majuscules, comme sur les plaques : « Mejido » ->
+ * « MEJIDO ». Les civilités restent telles quelles (« Mme DUPONT »).
+ * Même règle que le serveur, appliquée aussi aux fiches déjà enregistrées.
+ */
+function majInterphone(texte) {
+  return (texte || '')
+    .split(' ')
+    .map((mot) => (/^(m|mr|mme|mlle|melle|dr|me)\.?$/i.test(mot) ? mot : mot.toUpperCase()))
+    .join(' ');
 }
 
 /** Interphone, bâtiment, étage : dans cet ordre de priorité, même écriture. */
 function detailsClient(c) {
   const details = [];
-  if (c.interphone) details.push(['🔔', 'Interphone', c.interphone]);
+  if (c.interphone) details.push(['🔔', 'Interphone', majInterphone(c.interphone)]);
   if (c.batiment) details.push(['🏢', 'Bâtiment', c.batiment]);
   if (c.etage) details.push(['⬆️', 'Étage', c.etage]);
   return details;
@@ -2887,10 +2915,12 @@ function montrerFicheClient(id) {
   const barre = el('div', 'modal-btns');
   const modifier = el('button', 'btn-cancel', '✏️ Modifier');
   modifier.type = 'button';
-  modifier.addEventListener('click', () => {
+  // Maintien d'une seconde : la fiche agrandie se consulte, elle ne se
+  // modifie pas par un simple appui.
+  appuiLong(modifier, () => {
     fermer();
     ouvrirClient(c.id);
-  });
+  }, 1000);
   const bouton = el('button', 'btn-save', 'Fermer');
   bouton.type = 'button';
   bouton.addEventListener('click', fermer);
