@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — onglet Clients';
+const VERSION = '24/09 — clients autour de moi';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -1705,24 +1705,46 @@ const RAYON_METRES = 80;
 
 // Identifiants des fiches proches, dans l'ordre de distance. null = inactif.
 let proximite = null;
+// Adresses officielles autour de soi, triées par distance : sert à l'onglet
+// Clients, dont les fiches ne sont pas des codes.
+let nomsProches = [];
 
 /**
  * Correspondance stricte entre une adresse officielle et une fiche : un
  * numéro doit correspondre à un numéro entier, sinon « 7 » trouve le 17.
  */
-function fichesPour(adresse) {
+function correspondAdresse(adresse, cible) {
   const terms = searchKey(adresse).split(' ').filter(Boolean);
-  if (!terms.length) return [];
-  return records.filter((r) => {
-    const cle = searchKey(r.address);
-    const mots = cle.split(' ');
-    return terms.every((t) => {
-      if (!/^\d+$/.test(t)) return cle.includes(t);
-      // Un numéro doit correspondre à un numéro entier, éventuellement suivi
-      // d'un suffixe : « 10 » retrouve « 10bis », mais jamais « 100 ».
-      return mots.some((m) => m === t || (m.startsWith(t) && !/^\d/.test(m.slice(t.length))));
-    });
+  if (!terms.length || !cible) return false;
+  const cle = searchKey(cible);
+  const mots = cle.split(' ');
+  return terms.every((t) => {
+    if (!/^\d+$/.test(t)) return cle.includes(t);
+    // Un numéro doit correspondre à un numéro entier, éventuellement suivi
+    // d'un suffixe : « 10 » retrouve « 10bis », mais jamais « 100 ».
+    return mots.some((m) => m === t || (m.startsWith(t) && !/^\d/.test(m.slice(t.length))));
   });
+}
+
+function fichesPour(adresse) {
+  return records.filter((r) => correspondAdresse(adresse, r.address));
+}
+
+/** Rang du client dans les adresses proches (0 = la plus proche), -1 s'il n'y est pas. */
+function rangProche(c) {
+  if (!c.adresse) return -1;
+  return nomsProches.findIndex((nom) => correspondAdresse(nom, c.adresse));
+}
+
+/** Nombre de fiches affichées par « autour de moi », selon l'onglet. */
+function nombreProches() {
+  if (onglet === 'clients') return clients.filter((c) => rangProche(c) !== -1).length;
+  return proximite ? proximite.length : 0;
+}
+
+function signalerAucunProche() {
+  if (nombreProches()) return;
+  showToast((onglet === 'clients' ? 'Aucun client connu' : 'Aucune fiche connue') + ' dans les ' + RAYON_METRES + ' m');
 }
 
 // Dernière position connue. La garder évite d'attendre le GPS à chaque fois :
@@ -1788,7 +1810,7 @@ function distanceMetres(a, b) {
 }
 
 // Résultat déjà calculé, prêt à être affiché sans aucune attente.
-let cacheProches = null; // { ids, point, ts }
+let cacheProches = null; // { ids, noms, point, ts }
 let pointInterroge = null;
 let surveillanceId = null;
 
@@ -1808,12 +1830,13 @@ async function rafraichirProches(point) {
     const noms = await adressesAutour(point.lat, point.lon);
     const vus = new Set();
     for (const nom of noms) for (const fiche of fichesPour(nom)) vus.add(fiche.id);
-    cacheProches = { ids: [...vus], point, ts: Date.now() };
+    cacheProches = { ids: [...vus], noms, point, ts: Date.now() };
 
     // Si la liste des adresses proches est affichée, elle suit le déplacement
     // au lieu de rester figée sur le point où on l'avait ouverte.
     if (proximite !== null) {
       proximite = cacheProches.ids;
+      nomsProches = cacheProches.noms;
       renderList();
     }
   } catch {
@@ -1896,9 +1919,10 @@ async function autourDeMoi() {
   // Résultat déjà prêt : affichage immédiat, aucune attente.
   if (cacheProches && Date.now() - cacheProches.ts < 60000) {
     proximite = cacheProches.ids;
+    nomsProches = cacheProches.noms;
     searchInput.value = '';
     renderList();
-    if (!proximite.length) showToast('Aucune fiche connue dans les ' + RAYON_METRES + ' m');
+    signalerAucunProche();
     return;
   }
 
@@ -1925,15 +1949,14 @@ async function autourDeMoi() {
     }
 
     proximite = [...vus];
-    cacheProches = { ids: proximite, point: { lat, lon }, ts: Date.now() };
+    nomsProches = adresses;
+    cacheProches = { ids: proximite, noms: adresses, point: { lat, lon }, ts: Date.now() };
     pointInterroge = { lat, lon };
     searchInput.value = '';
     renderList();
     updateStatus();
 
-    if (!proximite.length) {
-      showToast('Aucune fiche connue dans les ' + RAYON_METRES + ' m');
-    }
+    signalerAucunProche();
   } catch {
     updateStatus();
     showToast('Service d’adresses injoignable');
@@ -1996,7 +2019,6 @@ function majBoutonProximite(etat) {
 // l'autorisation est déjà accordée : pas de demande de position surgissant
 // dès qu'on touche le champ.
 searchInput.addEventListener('focus', () => {
-  if (onglet === 'clients') return;
   if (searchInput.value || proximite !== null) return;
   if (positionAutorisee) {
     // Posée ici, dans le geste : une entrée créée après l'attente du GPS
@@ -2709,21 +2731,35 @@ function renderClients() {
   const terms = searchKey(searchInput.value).split(' ').filter(Boolean);
 
   // Recherche sur le nom, l'adresse et les infos à la fois.
-  const filtres = clients
-    .filter((c) => {
-      if (!terms.length) return true;
-      const cible = searchKey([c.nom, c.adresse, c.info].join(' '));
-      return terms.every((t) => cible.includes(t));
-    })
-    .sort((x, y) => (x.nom || '').localeCompare(y.nom || '', 'fr', { numeric: true, sensitivity: 'base' }));
+  let filtres;
+  if (proximite !== null) {
+    // Autour de moi : les clients dont l'adresse est dans le rayon, du plus
+    // proche au plus loin.
+    filtres = clients
+      .map((c) => ({ c, rang: rangProche(c) }))
+      .filter((x) => x.rang !== -1)
+      .sort((x, y) => x.rang - y.rang)
+      .map((x) => x.c);
+  } else {
+    filtres = clients
+      .filter((c) => {
+        if (!terms.length) return true;
+        const cible = searchKey([c.nom, c.adresse, c.info].join(' '));
+        return terms.every((t) => cible.includes(t));
+      })
+      .sort((x, y) => (x.nom || '').localeCompare(y.nom || '', 'fr', { numeric: true, sensitivity: 'base' }));
+  }
 
-  itemCount.textContent = `${filtres.length} client${filtres.length > 1 ? 's' : ''}`;
+  itemCount.textContent = proximite !== null
+    ? `📍 ${filtres.length} autour de vous`
+    : `${filtres.length} client${filtres.length > 1 ? 's' : ''}`;
 
   const fragment = document.createDocumentFragment();
   if (!filtres.length) {
-    fragment.appendChild(
-      el('div', 'empty-state', clients.length ? 'Aucun client ne correspond.' : 'Aucun client enregistré. Appuyez sur + pour en ajouter un.')
-    );
+    const vide = proximite !== null
+      ? 'Aucun client connu dans les ' + RAYON_METRES + ' m.'
+      : clients.length ? 'Aucun client ne correspond.' : 'Aucun client enregistré. Appuyez sur + pour en ajouter un.';
+    fragment.appendChild(el('div', 'empty-state', vide));
   } else {
     filtres.forEach((c) => fragment.appendChild(buildClientCard(c)));
   }
@@ -2756,7 +2792,6 @@ function changerOnglet(nouveau) {
 
   // Filtres propres aux codes : masqués dans l'onglet Clients.
   filterRecentBtn.style.display = surClients ? 'none' : '';
-  if (surClients) btnProximite.style.display = 'none';
   quitterProximite();
 
   searchInput.value = '';
