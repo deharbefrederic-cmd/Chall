@@ -1,7 +1,10 @@
 import {
   json, sanitizeText, isValidId, clientId, readJson, rateLimit, ipBucket, formatAddress, deviceNom, estAdmin
 } from '../_lib.js';
-import { assurerTable, sanitizeInfo, sanitizeOptionnel, toClient, MAX_NOM, MAX_ADRESSE } from '../_clients.js';
+import {
+  assurerTable, sanitizeInfo, sanitizeOptionnel, toClient, normBatiment, normEtage, normInterphone,
+  COLONNES, MAX_NOM, MAX_ADRESSE
+} from '../_clients.js';
 
 async function guard(context) {
   const { request, env, params } = context;
@@ -24,7 +27,7 @@ async function guard(context) {
 
   await assurerTable(db);
   const row = await db
-    .prepare('SELECT id, nom, adresse, info, created_at, updated_at, author FROM clients WHERE id = ?1')
+    .prepare(`SELECT ${COLONNES} FROM clients WHERE id = ?1`)
     .bind(params.id)
     .first();
 
@@ -42,6 +45,9 @@ export async function onRequestPatch(context) {
   if (!body) return json({ error: 'bad_request', message: 'Corps de requête illisible.' }, 400);
 
   let { nom, adresse, info } = row;
+  let batiment = row.batiment || '';
+  let etage = row.etage || '';
+  let interphone = row.interphone || '';
 
   if (body.nom !== undefined) {
     nom = sanitizeText(body.nom, MAX_NOM);
@@ -57,19 +63,39 @@ export async function onRequestPatch(context) {
     if (info === null) return json({ error: 'invalid_info', message: 'Informations trop longues.' }, 400);
   }
 
-  if (nom === row.nom && adresse === (row.adresse || '') && info === (row.info || '')) {
+  const champs = [
+    ['batiment', normBatiment, 'Bâtiment trop long.'],
+    ['etage', normEtage, 'Étage trop long.'],
+    ['interphone', normInterphone, 'Interphone trop long.']
+  ];
+  const valeurs = { batiment, etage, interphone };
+  for (const [cle, norm, message] of champs) {
+    if (body[cle] === undefined) continue;
+    const v = norm(body[cle]);
+    if (v === null) return json({ error: 'invalid_champ', message }, 400);
+    valeurs[cle] = v;
+  }
+  ({ batiment, etage, interphone } = valeurs);
+
+  if (
+    nom === row.nom && adresse === (row.adresse || '') && info === (row.info || '') &&
+    batiment === (row.batiment || '') && etage === (row.etage || '') && interphone === (row.interphone || '')
+  ) {
     return json({ client: toClient(row, me) });
   }
 
   const now = Date.now();
   await db
-    .prepare('UPDATE clients SET nom = ?1, adresse = ?2, info = ?3, updated_at = ?4, maj_par = ?5 WHERE id = ?6')
-    .bind(nom, adresse, info, now, me, id)
+    .prepare(
+      `UPDATE clients SET nom = ?1, adresse = ?2, info = ?3, batiment = ?4, etage = ?5, interphone = ?6,
+                          updated_at = ?7, maj_par = ?8 WHERE id = ?9`
+    )
+    .bind(nom, adresse, info, batiment, etage, interphone, now, me, id)
     .run();
 
   return json({
     client: toClient(
-      { ...row, nom, adresse, info, updated_at: now, par_qui: deviceNom(context.request) },
+      { ...row, nom, adresse, info, batiment, etage, interphone, updated_at: now, par_qui: deviceNom(context.request) },
       me
     )
   });

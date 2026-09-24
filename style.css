@@ -495,3 +495,34 @@ textarea:focus-visible {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+
+/* --- Fiche client : champs structurés --- */
+
+.champ-label {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.champs-duo {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.client-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 5px;
+}
+
+.client-tag {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e2e8f0;
+  background: #334155;
+  padding: 2px 7px;
+  border-radius: 5px;
+  -webkit-user-select: text;
+  user-select: text;
+}

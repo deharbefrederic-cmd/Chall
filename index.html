@@ -96,12 +96,24 @@
 <div class="modal" id="clientModal">
   <div class="modal-content">
     <h3 id="clientModalTitle">Nouveau client</h3>
-    <label for="clientNom" style="font-size: 13px; color: #94a3b8;">Nom</label>
-    <input type="text" id="clientNom" maxlength="60" autocomplete="off" placeholder="Nom sur la boîte, l'interphone...">
-    <label for="clientAdresse" style="font-size: 13px; color: #94a3b8;">Adresse (facultatif)</label>
-    <input type="text" id="clientAdresse" maxlength="120" autocomplete="off">
-    <label for="clientInfo" style="font-size: 13px; color: #94a3b8;">Infos (facultatif)</label>
-    <textarea id="clientInfo" maxlength="500" rows="4" placeholder="Étage, bâtiment, interphone, où déposer..."></textarea>
+    <label for="clientNom" class="champ-label">Nom</label>
+    <input type="text" id="clientNom" maxlength="60" autocomplete="off" enterkeyhint="next" placeholder="Nom sur la boîte, l'interphone...">
+    <label for="clientAdresse" class="champ-label">Adresse</label>
+    <input type="text" id="clientAdresse" maxlength="120" autocomplete="off" enterkeyhint="next">
+    <div class="champs-duo">
+      <div>
+        <label for="clientBatiment" class="champ-label">Bâtiment</label>
+        <input type="text" id="clientBatiment" maxlength="20" autocomplete="off" autocapitalize="characters" enterkeyhint="next" placeholder="A, B, 13D...">
+      </div>
+      <div>
+        <label for="clientEtage" class="champ-label">Étage</label>
+        <input type="text" id="clientEtage" maxlength="20" autocomplete="off" inputmode="numeric" enterkeyhint="next" placeholder="0 = RDC">
+      </div>
+    </div>
+    <label for="clientInterphone" class="champ-label">Interphone</label>
+    <input type="text" id="clientInterphone" maxlength="40" autocomplete="off" enterkeyhint="next" placeholder="Nom ou numéro sur la plaque">
+    <label for="clientInfo" class="champ-label">Remarque</label>
+    <textarea id="clientInfo" maxlength="500" rows="2" placeholder="Où déposer, gardien, horaires..."></textarea>
     <div class="modal-btns">
       <div class="modal-btns-left">
         <button class="btn-delete" id="clientDeleteBtn" type="button">🗑️ Suppr.</button>

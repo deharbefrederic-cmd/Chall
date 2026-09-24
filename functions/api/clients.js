@@ -1,5 +1,8 @@
 import { json, sanitizeText, isValidId, clientId, readJson, rateLimit, ipBucket, formatAddress, deviceNom } from './_lib.js';
-import { assurerTable, sanitizeInfo, sanitizeOptionnel, toClient, MAX_NOM, MAX_ADRESSE } from './_clients.js';
+import {
+  assurerTable, sanitizeInfo, sanitizeOptionnel, toClient, normBatiment, normEtage, normInterphone,
+  COLONNES, MAX_NOM, MAX_ADRESSE
+} from './_clients.js';
 
 export async function onRequestGet(context) {
   const db = context.env.DB;
@@ -8,7 +11,8 @@ export async function onRequestGet(context) {
 
   const { results } = await db
     .prepare(
-      `SELECT c.id, c.nom, c.adresse, c.info, c.created_at, c.updated_at, c.author,
+      `SELECT c.id, c.nom, c.adresse, c.info, c.batiment, c.etage, c.interphone,
+              c.created_at, c.updated_at, c.author,
               d.nom_declare AS par_qui
        FROM clients c
        LEFT JOIN devices d ON d.client_id = c.maj_par
@@ -45,6 +49,13 @@ export async function onRequestPost(context) {
   const info = sanitizeInfo(body.info);
   if (info === null) return json({ error: 'invalid_info', message: 'Informations trop longues.' }, 400);
 
+  const batiment = normBatiment(body.batiment);
+  const etage = normEtage(body.etage);
+  const interphone = normInterphone(body.interphone);
+  if (batiment === null || etage === null || interphone === null) {
+    return json({ error: 'invalid_champ', message: 'Bâtiment, étage ou interphone trop long.' }, 400);
+  }
+
   await assurerTable(db);
 
   const id = isValidId(body.id) ? body.id : crypto.randomUUID();
@@ -54,15 +65,15 @@ export async function onRequestPost(context) {
   // Identifiant fourni par le client : un double envoi ne crée pas de doublon.
   await db
     .prepare(
-      `INSERT INTO clients (id, nom, adresse, info, created_at, updated_at, author, maj_par)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?6)
+      `INSERT INTO clients (id, nom, adresse, info, batiment, etage, interphone, created_at, updated_at, author, maj_par)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9, ?9)
        ON CONFLICT(id) DO NOTHING`
     )
-    .bind(id, nom, adresse, info, now, author)
+    .bind(id, nom, adresse, info, batiment, etage, interphone, now, author)
     .run();
 
   const row = await db
-    .prepare('SELECT id, nom, adresse, info, created_at, updated_at, author FROM clients WHERE id = ?1')
+    .prepare(`SELECT ${COLONNES} FROM clients WHERE id = ?1`)
     .bind(id)
     .first();
 

@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — fenêtre stable';
+const VERSION = '24/09 — fiche client structurée';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -2707,13 +2707,26 @@ const clientModal = $('clientModal');
 const clientNom = $('clientNom');
 const clientAdresse = $('clientAdresse');
 const clientInfo = $('clientInfo');
+const clientBatiment = $('clientBatiment');
+const clientEtage = $('clientEtage');
+const clientInterphone = $('clientInterphone');
+
+// Ordre de saisie : la touche « Suivant » du clavier passe au champ d'après.
+const CHAMPS_CLIENT = [clientNom, clientAdresse, clientBatiment, clientEtage, clientInterphone, clientInfo];
+CHAMPS_CLIENT.slice(0, -1).forEach((champ, i) => {
+  champ.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.isComposing) return;
+    e.preventDefault();
+    CHAMPS_CLIENT[i + 1].focus();
+  });
+});
 const clientDeleteBtn = $('clientDeleteBtn');
 const clientSaveBtn = $('clientSaveBtn');
 
 const saveClientsCache = () => writeJson(CLIENTS_CACHE_KEY, clients);
 
 // Prédiction d'adresse, la même que pour les codes.
-const suggestionsClient = brancherSuggestions(clientAdresse, clientInfo);
+const suggestionsClient = brancherSuggestions(clientAdresse, clientBatiment);
 
 /**
  * Nouveau client : propose les adresses officielles autour de soi, comme
@@ -2749,6 +2762,16 @@ function buildClientCard(c) {
   if (c.updatedAt && Date.now() - c.updatedAt < RECENT_MS) titre.appendChild(el('span', 'badge-tag badge-recent', 'MAJ'));
   info.appendChild(titre);
   if (c.adresse) info.appendChild(el('div', 'client-adresse', '📍 ' + c.adresse));
+  // Bâtiment, étage, interphone : toujours dans le même ordre, même écriture.
+  const details = [];
+  if (c.batiment) details.push('🏢 Bât. ' + c.batiment);
+  if (c.etage) details.push(c.etage === 'RDC' ? '⬆️ RDC' : '⬆️ Ét. ' + c.etage);
+  if (c.interphone) details.push('🔔 ' + c.interphone);
+  if (details.length) {
+    const ligne = el('div', 'client-details');
+    details.forEach((d) => ligne.appendChild(el('span', 'client-tag', d)));
+    info.appendChild(ligne);
+  }
   if (c.info) info.appendChild(el('div', 'client-info', c.info));
 
   const fiche = codePourClient(c);
@@ -2789,7 +2812,7 @@ function renderClients() {
       // « Récents » : fiches ajoutées ou modifiées ces sept derniers jours.
       if (filterRecentOnly && !(c.updatedAt && Date.now() - c.updatedAt < RECENT_MS)) return false;
       if (!terms.length) return true;
-      const cible = searchKey([c.nom, c.adresse, c.info].join(' '));
+      const cible = searchKey([c.nom, c.adresse, c.batiment, c.interphone, c.info].join(' '));
       return terms.every((t) => cible.includes(t));
     });
     if (filterRecentOnly) filtres.sort((x, y) => (y.updatedAt || 0) - (x.updatedAt || 0));
@@ -2858,6 +2881,9 @@ function ouvrirClient(id) {
   clientNom.value = c ? c.nom : '';
   clientAdresse.value = c ? c.adresse : '';
   clientInfo.value = c ? c.info : '';
+  clientBatiment.value = c ? c.batiment || '' : '';
+  clientEtage.value = c ? c.etage || '' : '';
+  clientInterphone.value = c ? c.interphone || '' : '';
   // Suppression : l'auteur de la fiche, ou l'administrateur (vérifié côté serveur).
   clientDeleteBtn.style.display = c && (c.isMine || localStorage.getItem(ADMIN_KEY)) ? 'block' : 'none';
 
@@ -2903,6 +2929,9 @@ clientSaveBtn.addEventListener('click', async () => {
   const nom = clientNom.value.trim();
   const adresse = clientAdresse.value.trim();
   const info = clientInfo.value.trim();
+  const batiment = clientBatiment.value.trim();
+  const etage = clientEtage.value.trim();
+  const interphone = clientInterphone.value.trim();
 
   if (!nom) {
     await showDialog({ title: 'Nom manquant', message: 'Renseignez au moins le nom du client.', showCancel: false, okText: 'Compris' });
@@ -2916,13 +2945,13 @@ clientSaveBtn.addEventListener('click', async () => {
     if (clientEnCours) {
       data = await api('/api/clients/' + encodeURIComponent(clientEnCours), {
         method: 'PATCH',
-        body: JSON.stringify({ nom, adresse, info })
+        body: JSON.stringify({ nom, adresse, info, batiment, etage, interphone })
       });
       const idx = clients.findIndex((x) => x.id === clientEnCours);
       if (idx !== -1 && data.client) clients[idx] = data.client;
     } else {
       const id = getClientId().slice(0, 8) + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-      data = await api('/api/clients', { method: 'POST', body: JSON.stringify({ id, nom, adresse, info }) });
+      data = await api('/api/clients', { method: 'POST', body: JSON.stringify({ id, nom, adresse, info, batiment, etage, interphone }) });
       if (data.client) clients.push(data.client);
     }
     saveClientsCache();
