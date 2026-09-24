@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — adresse client prédite';
+const VERSION = '24/09 — suggestions selon position';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -688,11 +688,18 @@ function brancherSuggestions(champ, suivant) {
     if (controleur) controleur.abort();
     controleur = new AbortController();
 
-    const url =
+    let url =
       'https://data.geopf.fr/geocodage/search?index=address&limit=6&citycode=' +
       NICE_INSEE +
       '&q=' +
       encodeURIComponent(query);
+
+    // Position connue : le service classe d'abord les adresses proches.
+    // « 54 avenue du ra » propose alors l'avenue du quartier, pas la plus
+    // ressemblante de toute la ville. Aucune demande de position ici : on
+    // se sert seulement de la dernière obtenue, si elle a moins de 5 min.
+    const ici = positionAutorisee ? positionRecente(5 * 60 * 1000) : null;
+    if (ici) url += '&lat=' + ici.lat.toFixed(5) + '&lon=' + ici.lon.toFixed(5);
 
     // Numéro de voie saisi, à réinjecter si la suggestion est une rue sans numéro.
     // Le motif ne happe pas la première lettre du type de voie : dans « 12rue »,
