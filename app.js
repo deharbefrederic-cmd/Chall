@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '18/09 — HS daté 2';
+const VERSION = '24/09 — onglet Clients';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -22,6 +22,7 @@ const DELETE_WINDOW_MS = 24 * 60 * 60 * 1000;
 let records = [];
 let editingId = null;
 let filterRecentOnly = false;
+let onglet = 'codes'; // 'codes' ou 'clients'
 let isBusy = false;
 let toastTimeout;
 let deferredPrompt = null;
@@ -446,6 +447,10 @@ function majBoutonEffacer() {
 
 function renderList() {
   majBoutonEffacer();
+  if (onglet === 'clients') {
+    renderClients();
+    return;
+  }
   const terms = searchKey(searchInput.value).split(' ').filter(Boolean);
 
   let filtered = records.filter((item) => {
@@ -822,6 +827,10 @@ function showGroupDialog(item, candidats, nouveauCode) {
 /* ------------------------------- actions -------------------------------- */
 
 $('openAddModal').addEventListener('click', () => {
+  if (onglet === 'clients') {
+    ouvrirClient(null);
+    return;
+  }
   editingId = null;
   modalTitle.textContent = 'Ajouter un code';
   modalAddress.value = '';
@@ -1987,6 +1996,7 @@ function majBoutonProximite(etat) {
 // l'autorisation est déjà accordée : pas de demande de position surgissant
 // dès qu'on touche le champ.
 searchInput.addEventListener('focus', () => {
+  if (onglet === 'clients') return;
   if (searchInput.value || proximite !== null) return;
   if (positionAutorisee) {
     // Posée ici, dans le geste : une entrée créée après l'attente du GPS
@@ -2643,6 +2653,233 @@ function proposerTuto() {
   setTimeout(lancerTuto, 600);
 }
 
+/* ------------------------- registre des clients ------------------------- */
+
+const CLIENTS_CACHE_KEY = 'chall_clients_v1';
+const ONGLET_KEY = 'chall_onglet';
+
+let clients = readJson(CLIENTS_CACHE_KEY, []);
+let clientEnCours = null; // id de la fiche ouverte, null pour un ajout
+
+const clientList = $('clientList');
+const clientModal = $('clientModal');
+const clientNom = $('clientNom');
+const clientAdresse = $('clientAdresse');
+const clientInfo = $('clientInfo');
+const clientDeleteBtn = $('clientDeleteBtn');
+const clientSaveBtn = $('clientSaveBtn');
+
+const saveClientsCache = () => writeJson(CLIENTS_CACHE_KEY, clients);
+
+/** Code d'accès connu pour l'adresse du client, seulement s'il est sans ambiguïté. */
+function codePourClient(c) {
+  if (!c.adresse) return null;
+  const fiches = fichesPour(c.adresse);
+  return fiches.length === 1 ? fiches[0] : null;
+}
+
+function buildClientCard(c) {
+  const card = el('div', 'card');
+  const info = el('div', 'card-info');
+  info.appendChild(el('div', 'client-nom', c.nom));
+  if (c.adresse) info.appendChild(el('div', 'client-adresse', '📍 ' + c.adresse));
+  if (c.info) info.appendChild(el('div', 'client-info', c.info));
+
+  const fiche = codePourClient(c);
+  if (fiche) info.appendChild(el('div', 'client-code', '🔑 ' + fiche.code + (fiche.hs ? ' (HS)' : '')));
+
+  const dateLabel = formatUpdateDate(c.updatedAt);
+  if (dateLabel) {
+    const par = c.parQui ? ' · par ' + c.parQui : '';
+    info.appendChild(el('div', 'updated-date', '🕒 Modifié : ' + dateLabel + par));
+  }
+
+  const actions = el('div', 'actions');
+  const editBtn = el('button', 'btn-action', '✏️');
+  editBtn.type = 'button';
+  editBtn.setAttribute('aria-label', 'Modifier ' + c.nom);
+  editBtn.addEventListener('click', () => ouvrirClient(c.id));
+  actions.appendChild(editBtn);
+
+  card.append(info, actions);
+  return card;
+}
+
+function renderClients() {
+  const terms = searchKey(searchInput.value).split(' ').filter(Boolean);
+
+  // Recherche sur le nom, l'adresse et les infos à la fois.
+  const filtres = clients
+    .filter((c) => {
+      if (!terms.length) return true;
+      const cible = searchKey([c.nom, c.adresse, c.info].join(' '));
+      return terms.every((t) => cible.includes(t));
+    })
+    .sort((x, y) => (x.nom || '').localeCompare(y.nom || '', 'fr', { numeric: true, sensitivity: 'base' }));
+
+  itemCount.textContent = `${filtres.length} client${filtres.length > 1 ? 's' : ''}`;
+
+  const fragment = document.createDocumentFragment();
+  if (!filtres.length) {
+    fragment.appendChild(
+      el('div', 'empty-state', clients.length ? 'Aucun client ne correspond.' : 'Aucun client enregistré. Appuyez sur + pour en ajouter un.')
+    );
+  } else {
+    filtres.forEach((c) => fragment.appendChild(buildClientCard(c)));
+  }
+  clientList.replaceChildren(fragment);
+}
+
+async function loadClients() {
+  try {
+    const data = await api('/api/clients');
+    clients = Array.isArray(data.clients) ? data.clients : [];
+    saveClientsCache();
+  } catch (err) {
+    if (err.status === 401) openGate('Clé refusée. Saisissez la clé à jour.');
+    // Sinon : on garde la dernière liste connue.
+  }
+  if (onglet === 'clients') renderList();
+}
+
+function changerOnglet(nouveau) {
+  onglet = nouveau === 'clients' ? 'clients' : 'codes';
+  try { localStorage.setItem(ONGLET_KEY, onglet); } catch { /* sans mémoire */ }
+
+  const surClients = onglet === 'clients';
+  $('tabCodes').classList.toggle('active', !surClients);
+  $('tabClients').classList.toggle('active', surClients);
+  $('tabCodes').setAttribute('aria-selected', String(!surClients));
+  $('tabClients').setAttribute('aria-selected', String(surClients));
+  codeList.hidden = surClients;
+  clientList.hidden = !surClients;
+
+  // Filtres propres aux codes : masqués dans l'onglet Clients.
+  filterRecentBtn.style.display = surClients ? 'none' : '';
+  if (surClients) btnProximite.style.display = 'none';
+  quitterProximite();
+
+  searchInput.value = '';
+  searchInput.placeholder = surClients ? 'Rechercher nom, adresse, info...' : 'Rechercher rue, numéro...';
+  $('openAddModal').setAttribute('aria-label', surClients ? 'Ajouter un client' : 'Ajouter un code');
+
+  renderList();
+  if (surClients && getAccessKey() && navigator.onLine) loadClients();
+}
+
+$('tabCodes').addEventListener('click', () => changerOnglet('codes'));
+$('tabClients').addEventListener('click', () => changerOnglet('clients'));
+
+function ouvrirClient(id) {
+  const c = id ? clients.find((x) => x.id === id) : null;
+  clientEnCours = c ? c.id : null;
+
+  $('clientModalTitle').textContent = c ? 'Fiche client' : 'Nouveau client';
+  clientNom.value = c ? c.nom : '';
+  clientAdresse.value = c ? c.adresse : '';
+  clientInfo.value = c ? c.info : '';
+  // Suppression : l'auteur de la fiche, ou l'administrateur (vérifié côté serveur).
+  clientDeleteBtn.style.display = c && (c.isMine || localStorage.getItem(ADMIN_KEY)) ? 'block' : 'none';
+
+  clientModal.style.display = 'flex';
+  verrouillerFond();
+  if (!c) clientNom.focus();
+}
+
+function fermerClient() {
+  if (clientModal.style.display !== 'flex') return;
+  clientModal.style.display = 'none';
+  libererFond();
+}
+
+$('clientCancelBtn').addEventListener('click', fermerClient);
+
+/** Erreur d'écriture : la fenêtre reste ouverte, rien de ce qui a été tapé n'est perdu. */
+async function signalerEchecClient(err) {
+  if (err.status === 401) {
+    fermerClient();
+    openGate('Clé refusée. Saisissez la clé à jour.');
+    return;
+  }
+  const horsLigne = err.status === undefined;
+  await showDialog({
+    title: horsLigne ? 'Connexion requise' : 'Enregistrement refusé',
+    message: horsLigne
+      ? 'Les fiches clients ne sont enregistrées qu’avec du réseau. Réessayez une fois connecté.'
+      : err.message,
+    showCancel: false,
+    okText: 'Compris'
+  });
+}
+
+clientSaveBtn.addEventListener('click', async () => {
+  if (isBusy) return;
+
+  const nom = clientNom.value.trim();
+  const adresse = clientAdresse.value.trim();
+  const info = clientInfo.value.trim();
+
+  if (!nom) {
+    await showDialog({ title: 'Nom manquant', message: 'Renseignez au moins le nom du client.', showCancel: false, okText: 'Compris' });
+    return;
+  }
+
+  isBusy = true;
+  clientSaveBtn.disabled = true;
+  try {
+    let data;
+    if (clientEnCours) {
+      data = await api('/api/clients/' + encodeURIComponent(clientEnCours), {
+        method: 'PATCH',
+        body: JSON.stringify({ nom, adresse, info })
+      });
+      const idx = clients.findIndex((x) => x.id === clientEnCours);
+      if (idx !== -1 && data.client) clients[idx] = data.client;
+    } else {
+      const id = getClientId().slice(0, 8) + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      data = await api('/api/clients', { method: 'POST', body: JSON.stringify({ id, nom, adresse, info }) });
+      if (data.client) clients.push(data.client);
+    }
+    saveClientsCache();
+    fermerClient();
+    renderList();
+    showToast(clientEnCours ? 'Fiche client mise à jour' : 'Client ajouté');
+  } catch (err) {
+    await signalerEchecClient(err);
+  } finally {
+    clientSaveBtn.disabled = false;
+    isBusy = false;
+  }
+});
+
+clientDeleteBtn.addEventListener('click', async () => {
+  if (!clientEnCours || isBusy) return;
+  const c = clients.find((x) => x.id === clientEnCours);
+  if (!c) return;
+
+  const ok = await showDialog({
+    title: 'Confirmer la suppression',
+    message: `Supprimer la fiche de « ${c.nom} » ?`,
+    okText: 'Supprimer',
+    cancelText: 'Annuler'
+  });
+  if (!ok) return;
+
+  isBusy = true;
+  try {
+    await api('/api/clients/' + encodeURIComponent(c.id), { method: 'DELETE' });
+    clients = clients.filter((x) => x.id !== c.id);
+    saveClientsCache();
+    fermerClient();
+    renderList();
+    showToast('Fiche client supprimée');
+  } catch (err) {
+    await signalerEchecClient(err);
+  } finally {
+    isBusy = false;
+  }
+});
+
 /* ------------------------------ démarrage ------------------------------- */
 
 window.addEventListener('online', async () => {
@@ -2681,7 +2918,9 @@ if ('serviceWorker' in navigator) {
 
   // Le cache s'affiche immédiatement : l'appli est lisible avant toute requête.
   records = loadCache();
-  renderList();
+  let ongletMemorise = 'codes';
+  try { ongletMemorise = localStorage.getItem(ONGLET_KEY) || 'codes'; } catch { /* sans mémoire */ }
+  changerOnglet(ongletMemorise);
   updateStatus();
 
   if (!getAccessKey()) {

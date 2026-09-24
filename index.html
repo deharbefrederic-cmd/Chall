@@ -18,6 +18,10 @@
   <div class="brand-header">
     <img src="/logo.png" alt="Challivretou">
   </div>
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button class="tab active" id="tabCodes" type="button" role="tab" aria-selected="true" aria-controls="codeList">🔑 Codes</button>
+    <button class="tab" id="tabClients" type="button" role="tab" aria-selected="false" aria-controls="clientList">👤 Clients</button>
+  </nav>
   <div class="search-box">
     <input type="search" id="searchInput" placeholder="Rechercher rue, numéro..." autocomplete="off" aria-label="Rechercher une adresse">
     <button class="clear-btn" id="clearBtn" type="button" aria-label="Effacer la recherche">×</button>
@@ -32,7 +36,8 @@
   </div>
 </header>
 
-<div class="list" id="codeList"></div>
+<div class="list" id="codeList" role="tabpanel" aria-labelledby="tabCodes"></div>
+<div class="list" id="clientList" role="tabpanel" aria-labelledby="tabClients" hidden></div>
 <button class="btn-add" id="openAddModal" type="button" aria-label="Ajouter un code">+</button>
 
 <!-- Clé d'accès : bloque l'application tant qu'elle n'est pas validée -->
@@ -82,6 +87,28 @@
       <div class="modal-btns-right">
         <button class="btn-cancel" id="cancelModal" type="button">Annuler</button>
         <button class="btn-save" id="saveModal" type="button">Sauvegarder</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Fiche client : ajout / modification -->
+<div class="modal" id="clientModal">
+  <div class="modal-content">
+    <h3 id="clientModalTitle">Nouveau client</h3>
+    <label for="clientNom" style="font-size: 13px; color: #94a3b8;">Nom</label>
+    <input type="text" id="clientNom" maxlength="60" autocomplete="off" placeholder="Nom sur la boîte, l'interphone...">
+    <label for="clientAdresse" style="font-size: 13px; color: #94a3b8;">Adresse (facultatif)</label>
+    <input type="text" id="clientAdresse" maxlength="120" autocomplete="off">
+    <label for="clientInfo" style="font-size: 13px; color: #94a3b8;">Infos (facultatif)</label>
+    <textarea id="clientInfo" maxlength="500" rows="4" placeholder="Étage, bâtiment, interphone, où déposer..."></textarea>
+    <div class="modal-btns">
+      <div class="modal-btns-left">
+        <button class="btn-delete" id="clientDeleteBtn" type="button">🗑️ Suppr.</button>
+      </div>
+      <div class="modal-btns-right">
+        <button class="btn-cancel" id="clientCancelBtn" type="button">Annuler</button>
+        <button class="btn-save" id="clientSaveBtn" type="button">Sauvegarder</button>
       </div>
     </div>
   </div>

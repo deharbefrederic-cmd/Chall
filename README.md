@@ -55,6 +55,9 @@ et renvoyez le nouveau lien à l'équipe.
   _lib.js             validation, normalisation, limitation de débit
   codes.js            GET liste · POST création
   codes/[id].js       PATCH modification · DELETE suppression
+  clients.js          GET liste · POST création (registre des clients)
+  clients/[id].js     PATCH modification · DELETE suppression
+  _clients.js         table `clients` (créée automatiquement), validation
   stats.js            compteurs d'installation
   ping.js             validation de clé
 schema.sql            tables D1
@@ -76,6 +79,21 @@ tools/kv-to-sql.mjs   migration KV → D1
   d'attente, rejouées au retour du réseau. Les identifiants étant générés
   côté client, un rejeu ne crée jamais de doublon.
 - **Limitation de débit.** 60 écritures par heure et par IP.
+
+## Onglet Clients
+
+Un second onglet tient un registre partagé des clients : nom, adresse
+(facultative) et infos libres (étage, bâtiment, interphone, où déposer…).
+La recherche porte sur les trois champs. Si l'adresse correspond sans
+ambiguïté à une fiche de l'onglet Codes, le code s'affiche sur la carte.
+
+La table `clients` est créée toute seule à la première utilisation : rien
+à exécuter dans la console D1. Les fiches restent lisibles hors ligne, mais
+leur enregistrement demande du réseau. Une fiche ne peut être supprimée que
+par son auteur ou par l'administrateur.
+
+Ce registre contient des données personnelles de tiers : n'y noter que ce
+qui sert à la livraison.
 
 ## Restriction d'accès complémentaire (recommandé)
 

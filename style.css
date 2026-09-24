@@ -402,3 +402,85 @@ input:focus-visible {
   appearance: none;
   display: none;
 }
+
+/* --- Onglets Codes / Clients --- */
+
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.tab {
+  background: #1e293b;
+  color: #94a3b8;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tab.active {
+  background: #0369a1;
+  color: #fff;
+  border-color: #38bdf8;
+}
+
+.list[hidden] {
+  display: none;
+}
+
+.client-nom {
+  font-size: 16px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.client-adresse {
+  font-size: 14px;
+  color: #cbd5e1;
+  margin-top: 2px;
+}
+
+.client-info {
+  font-size: 13px;
+  color: #94a3b8;
+  margin-top: 4px;
+  line-height: 1.4;
+  white-space: pre-line;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.client-code {
+  display: inline-block;
+  margin-top: 6px;
+  background: #0c4a6e;
+  color: #e0f2fe;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 5px;
+}
+
+.modal-content textarea {
+  width: 100%;
+  padding: 12px;
+  margin: 8px 0 16px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  color: white;
+  border-radius: 8px;
+  font-size: 16px;
+  resize: vertical;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+textarea:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
