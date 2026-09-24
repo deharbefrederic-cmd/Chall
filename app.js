@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — clients récents';
+const VERSION = '24/09 — adresse client prédite';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -635,105 +635,117 @@ async function commit(op, optimistic) {
 // Service public de l'IGN, gratuit et sans clé. Résultats limités à Nice.
 const NICE_INSEE = '06088';
 
-const suggestBox = document.createElement('div');
-suggestBox.style.cssText =
-  'display:none;margin:-6px 0 12px;border:1px solid #334155;border-radius:10px;' +
-  'background:#0f172a;max-height:210px;overflow-y:auto;' +
-  // pan-y : le doigt peut faire défiler la liste verticalement.
-  'touch-action:pan-y;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;';
-modalAddress.insertAdjacentElement('afterend', suggestBox);
+/**
+ * Branche la liste de suggestions sous un champ d'adresse. Sert à la fiche
+ * code comme à la fiche client. Choisir une suggestion passe au champ suivant.
+ */
+function brancherSuggestions(champ, suivant) {
+  const box = document.createElement('div');
+  box.style.cssText =
+    'display:none;margin:-6px 0 12px;border:1px solid #334155;border-radius:10px;' +
+    'background:#0f172a;max-height:210px;overflow-y:auto;' +
+    // pan-y : le doigt peut faire défiler la liste verticalement.
+    'touch-action:pan-y;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;';
+  champ.insertAdjacentElement('afterend', box);
 
-let suggestTimer = null;
-let suggestController = null;
+  let minuteur = null;
+  let controleur = null;
 
-function hideSuggestions() {
-  suggestBox.style.display = 'none';
-  suggestBox.replaceChildren();
-}
-
-function showSuggestions(labels) {
-  if (!labels.length) {
-    hideSuggestions();
-    return;
+  function cacher() {
+    box.style.display = 'none';
+    box.replaceChildren();
   }
-  const fragment = document.createDocumentFragment();
 
-  labels.forEach((label) => {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.textContent = label; // texte, jamais de HTML
-    row.style.cssText =
-      'display:block;width:100%;text-align:left;padding:11px 14px;background:transparent;' +
-      'border:0;border-bottom:1px solid #1e293b;color:#e2e8f0;font-size:14px;';
-    // click, et surtout pas preventDefault sur l'appui : cela bloquerait
-    // le geste de défilement de la liste.
-    row.addEventListener('click', () => {
-      modalAddress.value = label;
-      hideSuggestions();
-      modalCode.focus();
+  function montrer(labels) {
+    if (!labels.length) {
+      cacher();
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+
+    labels.forEach((label) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.textContent = label; // texte, jamais de HTML
+      row.style.cssText =
+        'display:block;width:100%;text-align:left;padding:11px 14px;background:transparent;' +
+        'border:0;border-bottom:1px solid #1e293b;color:#e2e8f0;font-size:14px;';
+      // click, et surtout pas preventDefault sur l'appui : cela bloquerait
+      // le geste de défilement de la liste.
+      row.addEventListener('click', () => {
+        champ.value = label;
+        cacher();
+        suivant.focus();
+      });
+      fragment.appendChild(row);
     });
-    fragment.appendChild(row);
+
+    box.replaceChildren(fragment);
+    box.style.display = 'block';
+  }
+
+  async function chercher(query) {
+    if (controleur) controleur.abort();
+    controleur = new AbortController();
+
+    const url =
+      'https://data.geopf.fr/geocodage/search?index=address&limit=6&citycode=' +
+      NICE_INSEE +
+      '&q=' +
+      encodeURIComponent(query);
+
+    // Numéro de voie saisi, à réinjecter si la suggestion est une rue sans numéro.
+    // Le motif ne happe pas la première lettre du type de voie : dans « 12rue »,
+    // le « r » n'est pas suivi d'une fin de mot, il n'est donc pas pris pour un bis.
+    const saisi = query.match(/^\s*(\d+)(?:\s*(bis|ter)\b|([a-zA-Z])\b)?/i);
+    let numero = null;
+    if (saisi) {
+      numero = saisi[1];
+      if (saisi[2]) numero += saisi[2].toLowerCase();
+      else if (saisi[3]) numero += saisi[3].toUpperCase();
+    }
+
+    try {
+      // Requête vers un service tiers : aucun en-tête de l'application n'y est joint.
+      const res = await fetch(url, { signal: controleur.signal });
+      if (!res.ok) return;
+
+      const data = await res.json();
+      const labels = [];
+      for (const feature of data.features || []) {
+        const props = feature.properties || {};
+        let label = props.name || props.label;
+        if (!label) continue;
+        // La BAN renvoie la rue seule quand le numéro lui est inconnu.
+        if (numero && !props.housenumber && !/^\d/.test(label)) label = numero + ' ' + label;
+        if (!labels.includes(label)) labels.push(label);
+      }
+      montrer(labels);
+    } catch {
+      // Hors ligne, requête annulée ou service indisponible : la saisie libre reste possible.
+    }
+  }
+
+  champ.addEventListener('input', () => {
+    clearTimeout(minuteur);
+    const query = champ.value.trim();
+    if (query.length < 3 || !navigator.onLine) {
+      cacher();
+      return;
+    }
+    minuteur = setTimeout(() => chercher(query), 250);
   });
 
-  suggestBox.replaceChildren(fragment);
-  suggestBox.style.display = 'block';
+  // La liste se ferme quand on passe au champ suivant, pas sur la perte de
+  // focus : un simple défilement faisait perdre le focus et fermait la liste.
+  suivant.addEventListener('focus', cacher);
+
+  return { cacher, montrer };
 }
 
-async function fetchSuggestions(query) {
-  if (suggestController) suggestController.abort();
-  suggestController = new AbortController();
-
-  const url =
-    'https://data.geopf.fr/geocodage/search?index=address&limit=6&citycode=' +
-    NICE_INSEE +
-    '&q=' +
-    encodeURIComponent(query);
-
-  // Numéro de voie saisi, à réinjecter si la suggestion est une rue sans numéro.
-  // Le motif ne happe pas la première lettre du type de voie : dans « 12rue »,
-  // le « r » n'est pas suivi d'une fin de mot, il n'est donc pas pris pour un bis.
-  const saisi = query.match(/^\s*(\d+)(?:\s*(bis|ter)\b|([a-zA-Z])\b)?/i);
-  let numero = null;
-  if (saisi) {
-    numero = saisi[1];
-    if (saisi[2]) numero += saisi[2].toLowerCase();
-    else if (saisi[3]) numero += saisi[3].toUpperCase();
-  }
-
-  try {
-    // Requête vers un service tiers : aucun en-tête de l'application n'y est joint.
-    const res = await fetch(url, { signal: suggestController.signal });
-    if (!res.ok) return;
-
-    const data = await res.json();
-    const labels = [];
-    for (const feature of data.features || []) {
-      const props = feature.properties || {};
-      let label = props.name || props.label;
-      if (!label) continue;
-      // La BAN renvoie la rue seule quand le numéro lui est inconnu.
-      if (numero && !props.housenumber && !/^\d/.test(label)) label = numero + ' ' + label;
-      if (!labels.includes(label)) labels.push(label);
-    }
-    showSuggestions(labels);
-  } catch {
-    // Hors ligne, requête annulée ou service indisponible : la saisie libre reste possible.
-  }
-}
-
-modalAddress.addEventListener('input', () => {
-  clearTimeout(suggestTimer);
-  const query = modalAddress.value.trim();
-  if (query.length < 3 || !navigator.onLine) {
-    hideSuggestions();
-    return;
-  }
-  suggestTimer = setTimeout(() => fetchSuggestions(query), 250);
-});
-
-// La liste se ferme quand on passe au champ Code, pas sur la perte de focus :
-// un simple défilement faisait perdre le focus et fermait la liste.
-modalCode.addEventListener('focus', hideSuggestions);
+const suggestionsCode = brancherSuggestions(modalAddress, modalCode);
+const hideSuggestions = suggestionsCode.cacher;
+const showSuggestions = suggestionsCode.montrer;
 
 /* ------------------- résidences à plusieurs entrées ------------------- */
 
@@ -2693,6 +2705,27 @@ const clientSaveBtn = $('clientSaveBtn');
 
 const saveClientsCache = () => writeJson(CLIENTS_CACHE_KEY, clients);
 
+// Prédiction d'adresse, la même que pour les codes.
+const suggestionsClient = brancherSuggestions(clientAdresse, clientInfo);
+
+/**
+ * Nouveau client : propose les adresses officielles autour de soi, comme
+ * pour l'ajout d'un code. On est souvent devant la porte.
+ */
+async function proposerAdressesClient() {
+  if (!positionAutorisee || !navigator.onLine) return;
+  const encoreVide = () => !clientAdresse.value.trim() && clientModal.style.display === 'flex' && !clientEnCours;
+  try {
+    const point = positionRecente() || (await obtenirPosition({ timeout: 6000 }));
+    if (!encoreVide()) return;
+    const noms = await adressesAutour(point.lat, point.lon, 80);
+    if (!encoreVide()) return;
+    suggestionsClient.montrer(noms.slice(0, 6));
+  } catch {
+    /* position ou service indisponible : saisie normale */
+  }
+}
+
 /** Code d'accès connu pour l'adresse du client, seulement s'il est sans ambiguïté. */
 function codePourClient(c) {
   if (!c.adresse) return null;
@@ -2821,13 +2854,18 @@ function ouvrirClient(id) {
   // Suppression : l'auteur de la fiche, ou l'administrateur (vérifié côté serveur).
   clientDeleteBtn.style.display = c && (c.isMine || localStorage.getItem(ADMIN_KEY)) ? 'block' : 'none';
 
+  suggestionsClient.cacher();
   clientModal.style.display = 'flex';
   verrouillerFond();
-  if (!c) clientNom.focus();
+  if (!c) {
+    clientNom.focus();
+    proposerAdressesClient();
+  }
 }
 
 function fermerClient() {
   if (clientModal.style.display !== 'flex') return;
+  suggestionsClient.cacher();
   clientModal.style.display = 'none';
   libererFond();
 }
