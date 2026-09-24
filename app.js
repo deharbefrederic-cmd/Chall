@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — NOM Prénom';
+const VERSION = '24/09 — tri NOM Prénom';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -2873,24 +2873,20 @@ const CIVILITES = /^(m|mr|mme|mlle|melle|dr|me)\.?$/i;
 
 /**
  * Nom de famille déduit de la fiche, pour le classement alphabétique.
- * 1. l'interphone, s'il porte un nom (sans chiffre) : c'est le nom sur la plaque ;
- * 2. sinon, les mots écrits en MAJUSCULES quand le reste ne l'est pas
- *    (« Josiane MEJIDO » -> MEJIDO) ;
- * 3. sinon, tout sauf le premier mot, pris pour le prénom
- *    (« Patricia Monge » -> Monge).
+ * La convention de l'équipe est « NOM Prénom » :
+ * 1. les mots en MAJUSCULES quand le reste ne l'est pas : « BENESTANG Audrey »
+ *    -> BENESTANG, et les anciennes fiches « Josiane MEJIDO » -> MEJIDO ;
+ * 2. sinon, le nom tel qu'il est écrit, premier mot en tête :
+ *    « Monge Patricia » -> Monge.
+ * L'interphone n'est pas utilisé : il porte parfois un autre nom que celui
+ * du client.
  */
 function nomDeFamille(c) {
-  const mots = (texte) => (texte || '').split(/\s+/).filter((m) => m && !CIVILITES.test(m));
-
-  const plaque = mots(c.interphone);
-  if (plaque.length && !/\d/.test(c.interphone)) return plaque.join(' ');
-
-  const nom = mots(c.nom);
+  const nom = (c.nom || '').split(/\s+/).filter((m) => m && !CIVILITES.test(m));
   const estMaj = (m) => /[A-ZÀ-Þ]/.test(m) && m === m.toUpperCase();
   const maj = nom.filter(estMaj);
   if (maj.length && maj.length < nom.length) return maj.join(' ');
-
-  return nom.length > 1 ? nom.slice(1).join(' ') : nom.join(' ');
+  return nom.join(' ');
 }
 
 /** Clé de tri : nom de famille, puis nom complet pour départager. */
