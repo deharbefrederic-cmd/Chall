@@ -484,3 +484,14 @@ textarea:focus-visible {
   outline: 2px solid #38bdf8;
   outline-offset: 2px;
 }
+
+/* Fenêtres de saisie ancrées en haut : centrées, elles remontaient d'un coup
+   quand la liste des adresses proches arrivait ou que le clavier s'ouvrait,
+   et le doigt tombait à côté. Le haut ne bouge plus, seul le bas s'allonge. */
+#editModal,
+#clientModal {
+  align-items: flex-start;
+  padding-top: max(24px, env(safe-area-inset-top));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}

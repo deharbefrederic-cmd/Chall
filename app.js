@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — suggestions selon position';
+const VERSION = '24/09 — fenêtre stable';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
