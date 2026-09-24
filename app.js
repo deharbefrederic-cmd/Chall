@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — photo appareil ou galerie';
+const VERSION = '24/09 — photo en bas de fiche';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -2939,21 +2939,6 @@ function montrerFicheClient(id) {
   box.appendChild(el('h3', 'fiche-nom', c.nom));
   if (c.adresse) box.appendChild(el('div', 'fiche-adresse', '📍 ' + c.adresse));
 
-  // Photo chargée à part : la fiche s'affiche sans l'attendre.
-  if (c.photo || c.photoLocale) {
-    const img = el('img', 'fiche-photo');
-    img.alt = 'Photo de l’entrée';
-    img.hidden = true;
-    box.appendChild(img);
-    urlPhoto(c).then((url) => {
-      if (!url) return;
-      img.src = url;
-      img.hidden = false;
-      // Toucher la photo l'affiche en plein écran, toucher encore la réduit.
-      img.addEventListener('click', () => img.classList.toggle('plein-ecran'));
-    });
-  }
-
   const grille = el('div', 'fiche-grille');
   detailsClient(c).forEach(([icone, libelle, valeur]) => {
     grille.appendChild(el('div', 'fiche-libelle', icone + ' ' + libelle));
@@ -2971,6 +2956,22 @@ function montrerFicheClient(id) {
   if (c.info) {
     box.appendChild(el('div', 'fiche-libelle', '📝 Remarque'));
     box.appendChild(el('div', 'client-info fiche-remarque', c.info));
+  }
+
+  // Photo en bas : les infos utiles en tournée passent avant.
+  // Chargée à part, la fiche s'affiche sans l'attendre.
+  if (c.photo || c.photoLocale) {
+    const img = el('img', 'fiche-photo');
+    img.alt = 'Photo de l’entrée';
+    img.hidden = true;
+    box.appendChild(img);
+    urlPhoto(c).then((url) => {
+      if (!url) return;
+      img.src = url;
+      img.hidden = false;
+      // Toucher la photo l'affiche en plein écran, toucher encore la réduit.
+      img.addEventListener('click', () => img.classList.toggle('plein-ecran'));
+    });
   }
 
   const dateLabel = formatUpdateDate(c.updatedAt);

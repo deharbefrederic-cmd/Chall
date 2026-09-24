@@ -1,5 +1,5 @@
 // Bumper CACHE_VERSION à chaque déploiement pour forcer la mise à jour du shell.
-const CACHE_VERSION = 'chall-v16';
+const CACHE_VERSION = 'chall-v17';
 const SHELL = [
   '/',
   '/index.html',
