@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '26/09 — primes exceptionnelles';
+const VERSION = '26/09 — primes exc. 15 €';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -3670,7 +3670,13 @@ const PRIMES_EXC = [
   ['DRL', 'Déroulède'],
   ['CRN', 'Corniche']
 ];
-const montantExc = (code) => ((params.primesExc || {})[code] || {}).montant || 0;
+// Montant par défaut : 15 € brut par jour pour chacune, tant que
+// l'administrateur n'en a pas enregistré un autre.
+const MONTANT_EXC_DEFAUT = 15;
+const montantExc = (code) => {
+  const p = (params.primesExc || {})[code];
+  return p && Number.isFinite(p.montant) ? p.montant : MONTANT_EXC_DEFAUT;
+};
 const primesExcDuJour = (j) => (j && Array.isArray(j.x) ? j.x : []);
 const brutExcDuJour = (j) => primesExcDuJour(j).reduce((a, c) => a + montantExc(c), 0);
 /** Un jour sans livraison, sans total saisi et sans prime exceptionnelle n'a plus lieu d'exister. */

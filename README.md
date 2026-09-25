@@ -140,8 +140,8 @@ commence le lendemain. Sans date saisie, un jour habituel est utilisé
 
 **Primes exceptionnelles** journalières, cumulables avec la prime de bacs :
 RCM (Roquebrune-Cap-Martin), GBT (Gambetta), DRL (Déroulède), CRN
-(Corniche). Le livreur coche celles du jour ; les montants bruts sont fixés
-par l'administrateur (⚙️ Réglages) pour toute l'équipe.
+(Corniche), 15 € brut par jour chacune. Le livreur coche celles du jour ;
+l'administrateur peut changer les montants (⚙️ Réglages) pour toute l'équipe.
 
 Réglages communs (clôtures, jour habituel, montants) : route
 `/api/parametres`, lecture pour tous, écriture avec la clé d'administration,
