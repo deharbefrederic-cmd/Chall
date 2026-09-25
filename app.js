@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '25/09 — compteur de bacs';
+const VERSION = '25/09 — historique des bacs';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -3632,7 +3632,9 @@ clientPhotoSuppr.addEventListener('click', () => {
 
 // Tout reste sur le téléphone : c'est le relevé personnel du livreur, pour
 // vérifier sa fiche de paie. Rien n'est envoyé au serveur.
-// Format : { 'AAAA-MM-JJ': { l: [bacs de chaque livraison], c: total corrigé ou null } }
+// Format : { 'AAAA-MM-JJ': { l: [livraisons], c: total corrigé ou null } }
+// Une livraison est { n: bacs, t: heure } ; les toutes premières, enregistrées
+// avant l'historique, sont de simples nombres sans heure.
 const BACS_KEY = 'chall_bacs_v1';
 const PALIERS = [75, 100, 150];
 const PAVE = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -3649,7 +3651,10 @@ const dateDe = (cle) => {
 };
 const aujourdhui = () => cleJour(new Date());
 
-const totalJour = (j) => (!j ? 0 : j.c != null ? j.c : j.l.reduce((a, b) => a + b, 0));
+const bacsDe = (x) => (typeof x === 'number' ? x : x.n);
+const totalJour = (j) => (!j ? 0 : j.c != null ? j.c : j.l.reduce((a, x) => a + bacsDe(x), 0));
+/** Livraisons réelles, sans la ligne de départ laissée par une correction. */
+const nbLivraisons = (j) => (!j ? 0 : j.l.filter((x) => !x.base).length);
 /** Palier le plus haut atteint : c'est lui qui donne la prime du jour. */
 const palierAtteint = (total) => PALIERS.filter((p) => total >= p).pop() || null;
 
@@ -3669,10 +3674,10 @@ function ajouterLivraison(n) {
   const avant = totalJour(jour);
   // Une correction manuelle sert de base : les livraisons suivantes s'y ajoutent.
   if (jour.c != null) {
-    jour.l = [jour.c];
+    jour.l = [{ n: jour.c, t: Date.now(), base: true }];
     jour.c = null;
   }
-  jour.l.push(n);
+  jour.l.push({ n, t: Date.now() });
   bacs[cle] = jour;
   saveBacs();
 
@@ -3695,7 +3700,8 @@ function annulerDerniere() {
   const cle = aujourdhui();
   const jour = bacs[cle];
   if (!jour || !jour.l.length) return;
-  const n = jour.l.pop();
+  if (jour.l[jour.l.length - 1].base) return;
+  const n = bacsDe(jour.l.pop());
   if (!jour.l.length && jour.c == null) delete bacs[cle];
   saveBacs();
   showToast('Livraison de ' + n + ' bac' + (n > 1 ? 's' : '') + ' annulée');
@@ -3789,6 +3795,100 @@ async function corrigerJour(cle) {
   renderBacs();
 }
 
+const heureDe = (x) =>
+  typeof x === 'object' && x.t ? new Date(x.t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—';
+
+/**
+ * Historique d'une journée : chaque livraison avec son heure, ses bacs et le
+ * cumul, la plus récente en haut. ✕ supprime une ligne erronée.
+ */
+function listeHistorique(cle, apres) {
+  const jour = bacs[cle];
+  const frag = document.createDocumentFragment();
+  if (!jour || !jour.l.length) {
+    frag.appendChild(el('div', 'bacs-vide', jour && jour.c != null ? 'Total saisi à la main : ' + jour.c + ' bacs.' : 'Aucune livraison.'));
+    return frag;
+  }
+  let cumul = 0;
+  const lignes = jour.l.map((x, i) => {
+    cumul += bacsDe(x);
+    return { x, i, cumul };
+  });
+  lignes.reverse().forEach(({ x, i, cumul: c }) => {
+    const ligne = el('div', 'bacs-histo-ligne' + (x.base ? ' base' : ''));
+    ligne.append(
+      el('span', 'h', heureDe(x)),
+      el('span', 'n', x.base ? 'Total corrigé ' + bacsDe(x) : '+' + bacsDe(x) + ' bac' + (bacsDe(x) > 1 ? 's' : '')),
+      el('span', 'c', '= ' + c)
+    );
+    const suppr = el('button', 'x', '✕');
+    suppr.type = 'button';
+    suppr.setAttribute('aria-label', 'Supprimer cette ligne');
+    suppr.addEventListener('click', async () => {
+      const ok = await showDialog({
+        title: 'Supprimer cette livraison ?',
+        message: (x.base ? 'Total corrigé de ' : 'Livraison de ') + bacsDe(x) + ' bacs' + (heureDe(x) !== '—' ? ' à ' + heureDe(x) : '') + '.',
+        okText: 'Supprimer',
+        cancelText: 'Annuler'
+      });
+      if (!ok) return;
+      jour.l.splice(i, 1);
+      if (!jour.l.length && jour.c == null) delete bacs[cle];
+      saveBacs();
+      renderBacs();
+      if (apres) apres();
+      showToast('Ligne supprimée');
+    });
+    ligne.appendChild(suppr);
+    frag.appendChild(ligne);
+  });
+  if (jour.c != null) {
+    frag.prepend(el('div', 'bacs-vide', 'Total corrigé à la main : ' + jour.c + ' bacs (remplace les lignes ci-dessous).'));
+  }
+  return frag;
+}
+
+/** Détail d'un jour du récap : son historique, et la correction du total. */
+function montrerJour(cle) {
+  const modal = el('div', 'modal');
+  modal.style.display = 'flex';
+  modal.style.alignItems = 'flex-start';
+  modal.style.overflowY = 'auto';
+  const box = el('div', 'modal-content');
+  const titre = () => {
+    const j = bacs[cle];
+    return dateDe(cle).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) +
+      ' · ' + totalJour(j) + ' bacs';
+  };
+  const h = el('h3', null, titre());
+  h.style.textTransform = 'capitalize';
+  const liste = el('div', 'bacs-histo-modal');
+  const remplir = () => {
+    h.textContent = titre();
+    liste.replaceChildren(listeHistorique(cle, remplir));
+  };
+  remplir();
+  box.append(h, liste);
+
+  const fermer = () => { libererFond(); modal.remove(); };
+  const barre = el('div', 'modal-btns');
+  const corriger = el('button', 'btn-cancel', '✏️ Corriger le total');
+  corriger.type = 'button';
+  corriger.addEventListener('click', async () => {
+    fermer();
+    await corrigerJour(cle);
+  });
+  const ok = el('button', 'btn-save', 'Fermer');
+  ok.type = 'button';
+  ok.addEventListener('click', fermer);
+  modal.addEventListener('click', (e) => { if (e.target === modal) fermer(); });
+  barre.append(corriger, ok);
+  box.appendChild(barre);
+  modal.appendChild(box);
+  document.body.appendChild(modal);
+  verrouillerFond();
+}
+
 function joursDuMois(mois) {
   const prefixe = mois.getFullYear() + '-' + pad2(mois.getMonth() + 1) + '-';
   return Object.keys(bacs)
@@ -3802,7 +3902,7 @@ function renderBacs() {
   const cle = aujourdhui();
   const jour = bacs[cle];
   const total = totalJour(jour);
-  const livraisons = jour ? jour.l.length : 0;
+  const livraisons = nbLivraisons(jour);
 
   $('bacsJour').textContent = 'Aujourd’hui · ' + maintenant.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
   $('bacsTotal').textContent = String(total);
@@ -3833,8 +3933,12 @@ function renderBacs() {
     });
   }
   $('bacsAnnuler').disabled = !livraisons;
-  const derniere = livraisons ? jour.l[jour.l.length - 1] : null;
+  const derniere = livraisons ? bacsDe(jour.l[jour.l.length - 1]) : null;
   $('bacsAnnuler').textContent = derniere ? '↩️ Annuler (+' + derniere + ')' : '↩️ Annuler';
+
+  // ---- historique du jour (repliable)
+  $('bacsHistoTitre').textContent = '🕘 Historique du jour' + (livraisons ? ' · ' + livraisons + ' livraison' + (livraisons > 1 ? 's' : '') : '');
+  $('bacsHistoListe').replaceChildren(listeHistorique(cle));
 
   // ---- récap du mois
   if (!moisAffiche) moisAffiche = new Date(maintenant.getFullYear(), maintenant.getMonth(), 1);
@@ -3870,7 +3974,7 @@ function renderBacs() {
       el('span', 'nb', t + ' bacs'),
       el('span', 'prime' + (p ? ' ok' : ''), p ? '✅ ' + p : '—')
     );
-    ligne.addEventListener('click', () => corrigerJour(k));
+    ligne.addEventListener('click', () => montrerJour(k));
     liste.appendChild(ligne);
   });
   const ajout = el('button', 'bacs-ligne', '➕ Saisir un jour oublié');
@@ -3889,7 +3993,7 @@ function exporterBacs() {
   jours.forEach((k) => {
     const j = bacs[k];
     const t = totalJour(j);
-    lignes.push([dateDe(k).toLocaleDateString('fr-FR'), j.l.length, t, palierAtteint(t) || '', j.c != null ? 'oui' : ''].join(';'));
+    lignes.push([dateDe(k).toLocaleDateString('fr-FR'), nbLivraisons(j), t, palierAtteint(t) || '', j.c != null ? 'oui' : ''].join(';'));
   });
   const totaux = jours.map((k) => totalJour(bacs[k]));
   lignes.push('');
