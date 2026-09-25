@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '26/09 — titre mois';
+const VERSION = '26/09 — détail des primes du jour';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -3679,6 +3679,12 @@ const montantExc = (code) => {
 };
 const primesExcDuJour = (j) => (j && Array.isArray(j.x) ? j.x : []);
 const brutExcDuJour = (j) => primesExcDuJour(j).reduce((a, c) => a + montantExc(c), 0);
+/** Prime brute totale d'un jour : palier de bacs + primes exceptionnelles. */
+const primeJour = (j) => {
+  const p = palierAtteint(totalJour(j));
+  return (p ? PRIMES_BRUT[p] : 0) + brutExcDuJour(j);
+};
+
 /** Un jour sans livraison, sans total saisi et sans prime exceptionnelle n'a plus lieu d'exister. */
 const jourVide = (j) => !j.l.length && j.c == null && !primesExcDuJour(j).length;
 
@@ -3984,6 +3990,27 @@ function listeHistorique(cle, apres) {
   return frag;
 }
 
+/** Détail des primes d'un jour : ligne par prime, puis total brut et net estimé. */
+function detailPrimes(j) {
+  const frag = document.createDocumentFragment();
+  const ligne = (libelle, montant, classe) => {
+    const l = el('div', 'bacs-detail-ligne' + (classe ? ' ' + classe : ''));
+    l.append(el('span', null, libelle), el('span', null, montant));
+    frag.appendChild(l);
+  };
+  const total = totalJour(j);
+  const p = palierAtteint(total);
+  const prochain = PALIERS.find((x) => total < x);
+  ligne(p ? 'Prime bacs · palier ' + p : 'Prime bacs · ' + (prochain ? 'palier ' + prochain + ' non atteint' : '—'),
+    p ? euros(PRIMES_BRUT[p]) : '0 €', p ? '' : 'nulle');
+  const nomDe = Object.fromEntries(PRIMES_EXC);
+  primesExcDuJour(j).forEach((c) => ligne('Prime ' + c + ' · ' + nomDe[c], euros(montantExc(c))));
+  const brut = primeJour(j);
+  ligne('Total brut', euros(brut), 'total');
+  ligne('≈ Net estimé', euros(taux.impot ? netApresImpot(brut) : netDe(brut)), 'net');
+  return frag;
+}
+
 /** Détail d'un jour du récap : son historique, et la correction du total. */
 function montrerJour(cle) {
   const modal = el('div', 'modal');
@@ -4000,15 +4027,19 @@ function montrerJour(cle) {
   h.style.textTransform = 'capitalize';
   const liste = el('div', 'bacs-histo-modal');
   const exc = el('div', 'bacs-exc');
+  const detail = el('div', 'bacs-detail');
   const remplir = () => {
     h.textContent = titre();
     exc.replaceChildren(pastillesExc(cle, remplir));
+    detail.replaceChildren(detailPrimes(bacs[cle]));
     liste.replaceChildren(listeHistorique(cle, remplir));
   };
   remplir();
   const excTitre = el('p', 'bacs-aide', 'Primes exceptionnelles de ce jour');
   excTitre.style.margin = '6px 0 6px';
-  box.append(h, excTitre, exc, liste);
+  const histoTitre = el('p', 'bacs-aide', 'Livraisons');
+  histoTitre.style.margin = '12px 0 0';
+  box.append(h, detail, excTitre, exc, histoTitre, liste);
 
   const fermer = () => { libererFond(); modal.remove(); };
   const barre = el('div', 'modal-btns');
@@ -4185,7 +4216,8 @@ function renderBacs() {
     ligne.append(
       date,
       el('span', 'nb', t + ' bacs'),
-      el('span', 'prime' + (p ? ' ok' : ''), p ? '✅ ' + PRIMES_BRUT[p] + ' €' : '—')
+      // Prime totale du jour : palier de bacs et primes exceptionnelles cumulés.
+      el('span', 'prime' + (primeJour(bacs[k]) ? ' ok' : ''), primeJour(bacs[k]) ? '✅ ' + euros(primeJour(bacs[k])) : '—')
     );
     ligne.addEventListener('click', () => montrerJour(k));
     liste.appendChild(ligne);

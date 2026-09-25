@@ -1167,3 +1167,40 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   height: 22px;
   cursor: pointer;
 }
+
+/* --- Détail des primes d'un jour --- */
+
+.bacs-detail {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin: 8px 0 4px;
+}
+
+.bacs-detail-ligne {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 14px;
+  color: #e2e8f0;
+  font-variant-numeric: tabular-nums;
+}
+
+.bacs-detail-ligne.nulle {
+  color: #64748b;
+}
+
+.bacs-detail-ligne.total {
+  border-top: 1px solid #334155;
+  margin-top: 4px;
+  padding-top: 8px;
+  font-weight: 800;
+  font-size: 16px;
+}
+
+.bacs-detail-ligne.net {
+  color: #86efac;
+  font-weight: 700;
+}
