@@ -60,7 +60,7 @@ et renvoyez le nouveau lien à l'équipe.
   _clients.js         table `clients` (créée automatiquement), validation
   photos/[id].js      GET · PUT · DELETE photo d'une fiche client (R2)
   stats.js            compteurs d'installation
-  parametres.js       réglages communs de la paie (clôtures, primes)
+  parametres.js       réglages communs de la paie (clôtures)
   ping.js             validation de clé
 schema.sql            tables D1
 tools/kv-to-sql.mjs   migration KV → D1
@@ -141,13 +141,11 @@ quand. Modifier ou effacer une date existante demande une confirmation. Sans dat
 
 **Primes exceptionnelles** journalières, cumulables avec la prime de bacs :
 RCM (Roquebrune-Cap-Martin), GBT (Gambetta), DRL (Déroulède), CRN
-(Corniche), 15 € brut par jour chacune. Le livreur coche celles du jour ;
-l'administrateur peut changer les montants (⚙️ Réglages) pour toute l'équipe.
+(Corniche), 15 € brut par jour chacune (constante `MONTANT_EXC` dans
+`app.js`). Le livreur coche celles du jour.
 
-Réglages communs (clôtures, jour habituel, montants) : route
-`/api/parametres`, table `parametres` créée automatiquement. Clôtures et
-jour habituel modifiables par tous ; montants des primes avec la clé
-d'administration seulement.
+Réglages communs (clôtures, jour habituel) : route `/api/parametres`,
+table `parametres` créée automatiquement, modifiables par tous.
 
 Les comptages restent **sur le téléphone** (stockage du navigateur) : rien
 n'est envoyé au serveur. Vider les données du site ou changer de téléphone

@@ -1,9 +1,8 @@
 import { json, estAdmin, readJson, rateLimit, ipBucket, deviceNom } from './_lib.js';
 
-// Réglages communs à toute l'équipe :
-// - dates de clôture de la paie : tout livreur peut les saisir (celui qui
-//   apprend la date la donne aux autres) ; qui et quand sont notés ;
-// - montants des primes exceptionnelles : administrateur seulement.
+// Réglages communs à toute l'équipe : dates de clôture de la paie et jour
+// habituel. Tout livreur peut les saisir (celui qui apprend la date la donne
+// aux autres) ; qui et quand sont notés.
 
 let tablePrete = false;
 async function assurerTable(db) {
@@ -14,7 +13,6 @@ async function assurerTable(db) {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MOIS_RE = /^\d{4}-\d{2}$/;
-const CODE_RE = /^[A-Z]{3}$/;
 
 /** Dates de clôture : { 'AAAA-MM': 'AAAA-MM-JJ' }. Tout le reste est écarté. */
 function validerClotures(v) {
@@ -22,19 +20,6 @@ function validerClotures(v) {
   const propre = {};
   for (const [mois, date] of Object.entries(v).slice(0, 120)) {
     if (MOIS_RE.test(mois) && typeof date === 'string' && DATE_RE.test(date)) propre[mois] = date;
-  }
-  return propre;
-}
-
-/** Primes exceptionnelles : { RCM: { nom, montant } }, montant brut en euros. */
-function validerPrimes(v) {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
-  const propre = {};
-  for (const [code, p] of Object.entries(v).slice(0, 20)) {
-    if (!CODE_RE.test(code) || !p || typeof p !== 'object') continue;
-    const montant = Number(p.montant);
-    const nom = typeof p.nom === 'string' ? p.nom.slice(0, 40) : code;
-    if (Number.isFinite(montant) && montant >= 0 && montant < 10000) propre[code] = { nom, montant: Math.round(montant * 100) / 100 };
   }
   return propre;
 }
@@ -61,10 +46,6 @@ export async function onRequestPut(context) {
   const { request, env } = context;
   const body = await readJson(request);
   if (!body) return json({ error: 'bad_request', message: 'Corps de requête illisible.' }, 400);
-
-  if (body.primesExc !== undefined && !estAdmin(request, env)) {
-    return json({ error: 'forbidden', message: "Les montants des primes sont réservés à l'administrateur." }, 403);
-  }
 
   const db = env.DB;
   const limit = await rateLimit(db, ipBucket(request, 'write'), 60, 3600);
@@ -99,11 +80,6 @@ export async function onRequestPut(context) {
     const j = parseInt(body.clotureHabituelle, 10);
     if (!(j >= 1 && j <= 31)) return json({ error: 'bad_request', message: 'Jour de clôture invalide.' }, 400);
     lot.push(ecrire('clotureHabituelle', j));
-  }
-  if (body.primesExc !== undefined) {
-    const p = validerPrimes(body.primesExc);
-    if (!p) return json({ error: 'bad_request', message: 'Primes invalides.' }, 400);
-    lot.push(ecrire('primesExc', p));
   }
   if (lot.length) await db.batch(lot);
 

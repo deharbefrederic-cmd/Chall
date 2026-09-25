@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '26/09 — interphone 📟';
+const VERSION = '26/09 — montants retirés des réglages';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -3692,8 +3692,7 @@ let taux = { cotisations: 22, impot: 0, cloture: 31, ...readJson(TAUX_KEY, {}) }
 // Réglages communs à toute l'équipe, fixés par l'administrateur sur le
 // serveur, gardés en copie locale pour fonctionner hors ligne :
 // - clotures : { 'AAAA-MM': 'AAAA-MM-JJ' } (mois de paie -> dernier jour compté) ;
-// - clotureHabituelle : jour utilisé quand la date du mois n'est pas saisie ;
-// - primesExc : { RCM: { nom, montant } } montants bruts par jour.
+// - clotureHabituelle : jour utilisé quand la date du mois n'est pas saisie.
 const PARAMS_KEY = 'chall_params_v1';
 let params = readJson(PARAMS_KEY, {});
 const clotures = () => params.clotures || {};
@@ -3709,13 +3708,9 @@ const PRIMES_EXC = [
   ['DRL', 'Déroulède'],
   ['CRN', 'Corniche']
 ];
-// Montant par défaut : 15 € brut par jour pour chacune, tant que
-// l'administrateur n'en a pas enregistré un autre.
-const MONTANT_EXC_DEFAUT = 15;
-const montantExc = (code) => {
-  const p = (params.primesExc || {})[code];
-  return p && Number.isFinite(p.montant) ? p.montant : MONTANT_EXC_DEFAUT;
-};
+// 15 € brut par jour chacune. Montant fixé ici, pas de réglage dans l'appli.
+const MONTANT_EXC = 15;
+const montantExc = () => MONTANT_EXC;
 const primesExcDuJour = (j) => (j && Array.isArray(j.x) ? j.x : []);
 const brutExcDuJour = (j) => primesExcDuJour(j).reduce((a, c) => a + montantExc(c), 0);
 /** Prime brute totale d'un jour : palier de bacs + primes exceptionnelles. */
@@ -4332,12 +4327,10 @@ const lireNombre = (i, def, max = 100) => {
 };
 
 /**
- * Réglages de la paie. Les taux sont personnels et restent sur le téléphone.
- * Jour de clôture habituel et montants des primes exceptionnelles valent pour
- * toute l'équipe : seul l'administrateur les modifie.
+ * Réglages de la paie. Les taux sont personnels et restent sur le téléphone ;
+ * le jour de clôture habituel vaut pour toute l'équipe.
  */
 function reglerTaux() {
-  const admin = adminSurCetAppareil();
   const modal = el('div', 'modal');
   modal.style.display = 'flex';
   modal.style.alignItems = 'flex-start';
@@ -4358,18 +4351,6 @@ function reglerTaux() {
   box.appendChild(commun);
   const clo = champReglage(box, 'Jour de clôture habituel (1 à 31), quand la date du mois n’est pas saisie', clotureHabituelle(), 'numeric');
   const cloAvant = clotureHabituelle();
-  const montants = {};
-  if (admin) {
-    PRIMES_EXC.forEach(([code, nom]) => {
-      montants[code] = champReglage(box, 'Prime ' + code + ' — ' + nom + ' (€ brut par jour)', montantExc(code));
-    });
-  } else {
-    const info = el('p', null,
-      'Montants des primes exceptionnelles, fixés par l’administrateur : ' +
-      PRIMES_EXC.map(([c]) => c + ' ' + euros(montantExc(c))).join(', ') + ' brut par jour.');
-    info.style.cssText = 'font-size:13px;color:#cbd5e1;line-height:1.4;margin-bottom:6px;';
-    box.appendChild(info);
-  }
 
   const fin = () => { libererFond(); modal.remove(); };
   const barre = el('div', 'modal-btns');
@@ -4385,11 +4366,6 @@ function reglerTaux() {
     const jour = parseInt(clo.value, 10);
     const modif = {};
     if (jour >= 1 && jour <= 31 && jour !== cloAvant) modif.clotureHabituelle = jour;
-    if (admin) {
-      const primes = {};
-      PRIMES_EXC.forEach(([code, nom]) => { primes[code] = { nom, montant: lireNombre(montants[code], 15, 10000) }; });
-      modif.primesExc = primes;
-    }
     if (Object.keys(modif).length) {
       ok.disabled = true;
       const reussi = await enregistrerParametres(modif);
