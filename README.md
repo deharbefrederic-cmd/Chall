@@ -116,6 +116,19 @@ Ce registre contient des données personnelles de tiers : n'y noter que ce
 qui sert à la livraison. Photos : uniquement des lieux, jamais de personnes
 ni l'intérieur d'un logement.
 
+## Onglet Bacs
+
+Compteur personnel pour la prime de bacs journalière (paliers 75, 100 et
+150 bacs). Une livraison = un appui sur son nombre de bacs (+1 à +8, ou
+« Autre nombre ») ; « Annuler » retire la dernière. Vibration et message
+à chaque palier franchi. Le récap mensuel compte les jours par palier
+atteint, permet de corriger un jour ou d'en saisir un oublié, et s'exporte
+en CSV pour comparer avec la fiche de paie.
+
+Les comptages restent **sur le téléphone** (stockage du navigateur) : rien
+n'est envoyé au serveur. Vider les données du site ou changer de téléphone
+les efface : exporter chaque mois pour en garder une copie.
+
 ## Restriction d'accès complémentaire (recommandé)
 
 La clé partagée empêche la lecture publique, mais elle circule entre

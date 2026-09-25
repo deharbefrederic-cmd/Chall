@@ -21,6 +21,7 @@
   <nav class="tabs" role="tablist" aria-label="Sections">
     <button class="tab active" id="tabCodes" type="button" role="tab" aria-selected="true" aria-controls="codeList">🔑 Codes</button>
     <button class="tab" id="tabClients" type="button" role="tab" aria-selected="false" aria-controls="clientList">👤 Clients</button>
+    <button class="tab" id="tabBacs" type="button" role="tab" aria-selected="false" aria-controls="bacsPanel">📦 Bacs</button>
   </nav>
   <div class="search-box">
     <input type="search" id="searchInput" placeholder="Rechercher rue, numéro..." autocomplete="off" aria-label="Rechercher une adresse">
@@ -38,6 +39,40 @@
 
 <div class="list" id="codeList" role="tabpanel" aria-labelledby="tabCodes"></div>
 <div class="list" id="clientList" role="tabpanel" aria-labelledby="tabClients" hidden></div>
+
+<!-- Compteur de bacs : tout reste sur le téléphone du livreur. -->
+<section id="bacsPanel" class="bacs" role="tabpanel" aria-labelledby="tabBacs" hidden>
+  <div class="bacs-jour" id="bacsJour"></div>
+  <div class="bacs-total"><span id="bacsTotal">0</span><small>bacs</small></div>
+  <div class="bacs-sous" id="bacsSous"></div>
+
+  <div class="bacs-jauge" aria-hidden="true">
+    <div class="bacs-remplissage" id="bacsRemplissage"></div>
+    <span class="bacs-cran" style="left:50%"></span>
+    <span class="bacs-cran" style="left:66.67%"></span>
+  </div>
+  <div class="bacs-paliers" id="bacsPaliers"></div>
+  <div class="bacs-prochain" id="bacsProchain"></div>
+
+  <p class="bacs-aide">Une livraison = un appui sur son nombre de bacs</p>
+  <div class="bacs-pave" id="bacsPave"></div>
+
+  <div class="bacs-actions">
+    <button type="button" class="btn-cancel" id="bacsAnnuler">↩️ Annuler la dernière</button>
+    <button type="button" class="btn-cancel" id="bacsAutre">➕ Autre nombre</button>
+  </div>
+
+  <div class="bacs-mois">
+    <div class="bacs-mois-tete">
+      <button type="button" class="btn-cancel" id="bacsMoisPrec" aria-label="Mois précédent">‹</button>
+      <h3 id="bacsMoisTitre"></h3>
+      <button type="button" class="btn-cancel" id="bacsMoisSuiv" aria-label="Mois suivant">›</button>
+    </div>
+    <div class="bacs-bilan" id="bacsBilan"></div>
+    <div class="bacs-jours" id="bacsJours"></div>
+    <button type="button" class="btn-cancel bacs-export" id="bacsExport">💾 Exporter le mois</button>
+  </div>
+</section>
 <button class="btn-add" id="openAddModal" type="button" aria-label="Ajouter un code">+</button>
 
 <!-- Clé d'accès : bloque l'application tant qu'elle n'est pas validée -->

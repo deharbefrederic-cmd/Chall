@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '24/09 — détecteur de prénom';
+const VERSION = '25/09 — compteur de bacs';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -22,7 +22,7 @@ const DELETE_WINDOW_MS = 24 * 60 * 60 * 1000;
 let records = [];
 let editingId = null;
 let filterRecentOnly = false;
-let onglet = 'codes'; // 'codes' ou 'clients'
+let onglet = 'codes'; // 'codes', 'clients' ou 'bacs'
 let isBusy = false;
 let toastTimeout;
 let deferredPrompt = null;
@@ -475,6 +475,10 @@ function majBoutonEffacer() {
 
 function renderList() {
   majBoutonEffacer();
+  if (onglet === 'bacs') {
+    renderBacs();
+    return;
+  }
   if (onglet === 'clients') {
     renderClients();
     return;
@@ -3217,16 +3221,18 @@ async function loadClients() {
 }
 
 function changerOnglet(nouveau) {
-  onglet = nouveau === 'clients' ? 'clients' : 'codes';
+  onglet = ['clients', 'bacs'].includes(nouveau) ? nouveau : 'codes';
   try { localStorage.setItem(ONGLET_KEY, onglet); } catch { /* sans mémoire */ }
 
   const surClients = onglet === 'clients';
-  $('tabCodes').classList.toggle('active', !surClients);
-  $('tabClients').classList.toggle('active', surClients);
-  $('tabCodes').setAttribute('aria-selected', String(!surClients));
-  $('tabClients').setAttribute('aria-selected', String(surClients));
-  codeList.hidden = surClients;
+  for (const [id, nom] of [['tabCodes', 'codes'], ['tabClients', 'clients'], ['tabBacs', 'bacs']]) {
+    $(id).classList.toggle('active', onglet === nom);
+    $(id).setAttribute('aria-selected', String(onglet === nom));
+  }
+  codeList.hidden = onglet !== 'codes';
   clientList.hidden = !surClients;
+  $('bacsPanel').hidden = onglet !== 'bacs';
+  document.body.classList.toggle('onglet-bacs', onglet === 'bacs');
 
   quitterProximite();
 
@@ -3240,6 +3246,7 @@ function changerOnglet(nouveau) {
 
 $('tabCodes').addEventListener('click', () => changerOnglet('codes'));
 $('tabClients').addEventListener('click', () => changerOnglet('clients'));
+$('tabBacs').addEventListener('click', () => changerOnglet('bacs'));
 
 function ouvrirClient(id) {
   const c = id ? clients.find((x) => x.id === id) : null;
@@ -3621,6 +3628,298 @@ clientPhotoSuppr.addEventListener('click', () => {
   afficherApercu(null);
 });
 
+/* --------------------------- compteur de bacs --------------------------- */
+
+// Tout reste sur le téléphone : c'est le relevé personnel du livreur, pour
+// vérifier sa fiche de paie. Rien n'est envoyé au serveur.
+// Format : { 'AAAA-MM-JJ': { l: [bacs de chaque livraison], c: total corrigé ou null } }
+const BACS_KEY = 'chall_bacs_v1';
+const PALIERS = [75, 100, 150];
+const PAVE = [1, 2, 3, 4, 5, 6, 7, 8];
+
+let bacs = readJson(BACS_KEY, {});
+let moisAffiche = null; // premier jour du mois affiché dans le récap
+
+const saveBacs = () => writeJson(BACS_KEY, bacs);
+const pad2 = (n) => String(n).padStart(2, '0');
+const cleJour = (d) => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+const dateDe = (cle) => {
+  const [a, m, j] = cle.split('-').map(Number);
+  return new Date(a, m - 1, j);
+};
+const aujourdhui = () => cleJour(new Date());
+
+const totalJour = (j) => (!j ? 0 : j.c != null ? j.c : j.l.reduce((a, b) => a + b, 0));
+/** Palier le plus haut atteint : c'est lui qui donne la prime du jour. */
+const palierAtteint = (total) => PALIERS.filter((p) => total >= p).pop() || null;
+
+// Le navigateur peut effacer les données d'un site peu utilisé : on lui
+// demande de garder celles-ci. Sans effet si déjà accordé ou non géré.
+(function protegerStockage() {
+  try {
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+  } catch {
+    /* pas de stockage persistant */
+  }
+})();
+
+function ajouterLivraison(n) {
+  const cle = aujourdhui();
+  const jour = bacs[cle] || { l: [], c: null };
+  const avant = totalJour(jour);
+  // Une correction manuelle sert de base : les livraisons suivantes s'y ajoutent.
+  if (jour.c != null) {
+    jour.l = [jour.c];
+    jour.c = null;
+  }
+  jour.l.push(n);
+  bacs[cle] = jour;
+  saveBacs();
+
+  const apres = totalJour(jour);
+  const franchi = PALIERS.filter((p) => avant < p && apres >= p).pop();
+  if (franchi) {
+    if (navigator.vibrate) navigator.vibrate([60, 60, 120]);
+    showToast('🎉 Palier ' + franchi + ' bacs atteint !');
+  } else if (navigator.vibrate) {
+    navigator.vibrate(15);
+  }
+
+  const total = $('bacsTotal').parentElement;
+  total.classList.add('pulse');
+  setTimeout(() => total.classList.remove('pulse'), 120);
+  renderBacs();
+}
+
+function annulerDerniere() {
+  const cle = aujourdhui();
+  const jour = bacs[cle];
+  if (!jour || !jour.l.length) return;
+  const n = jour.l.pop();
+  if (!jour.l.length && jour.c == null) delete bacs[cle];
+  saveBacs();
+  showToast('Livraison de ' + n + ' bac' + (n > 1 ? 's' : '') + ' annulée');
+  renderBacs();
+}
+
+/**
+ * Petite fenêtre de saisie : un nombre, et la date si on l'autorise.
+ * Renvoie { cle, total } ou null. Un total vide ou nul efface le jour.
+ */
+function saisirBacs({ titre, texte, cle, total, choisirDate = false }) {
+  return new Promise((resolve) => {
+    const modal = el('div', 'modal');
+    modal.style.display = 'flex';
+    const box = el('div', 'modal-content');
+    box.appendChild(el('h3', null, titre));
+    if (texte) {
+      const p = el('p', null, texte);
+      p.style.cssText = 'font-size:13px;color:#94a3b8;margin:4px 0 8px;line-height:1.4;';
+      box.appendChild(p);
+    }
+
+    let champDate = null;
+    if (choisirDate) {
+      champDate = document.createElement('input');
+      champDate.type = 'date';
+      champDate.value = cle || aujourdhui();
+      champDate.max = aujourdhui();
+      box.appendChild(champDate);
+    }
+
+    const champ = document.createElement('input');
+    champ.type = 'text';
+    champ.inputMode = 'numeric';
+    champ.pattern = '[0-9]*';
+    champ.maxLength = 3;
+    champ.placeholder = 'Nombre de bacs';
+    champ.value = total != null ? String(total) : '';
+    box.appendChild(champ);
+
+    const barre = el('div', 'modal-btns');
+    barre.style.cssText = 'justify-content:flex-end;gap:10px;';
+    const annuler = el('button', 'btn-cancel', 'Annuler');
+    annuler.type = 'button';
+    const ok = el('button', 'btn-save', 'Valider');
+    ok.type = 'button';
+    const fin = (v) => { libererFond(); modal.remove(); resolve(v); };
+    annuler.addEventListener('click', () => fin(null));
+    ok.addEventListener('click', () => {
+      const valeur = parseInt(champ.value, 10);
+      const date = champDate ? champDate.value : cle;
+      if (!date) return;
+      fin({ cle: date, total: Number.isFinite(valeur) && valeur > 0 ? Math.min(valeur, 999) : 0 });
+    });
+    champ.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok.click(); });
+    barre.append(annuler, ok);
+    box.appendChild(barre);
+    modal.appendChild(box);
+    document.body.appendChild(modal);
+    verrouillerFond();
+    champ.focus();
+  });
+}
+
+async function autreNombre() {
+  const r = await saisirBacs({ titre: 'Livraison', texte: 'Nombre de bacs de cette livraison.', cle: aujourdhui() });
+  if (r && r.total) ajouterLivraison(r.total);
+}
+
+/** Corriger le total d'un jour, ou saisir un jour oublié. */
+async function corrigerJour(cle) {
+  const jour = cle ? bacs[cle] : null;
+  const r = await saisirBacs({
+    titre: cle ? 'Corriger le ' + dateDe(cle).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) : 'Saisir un jour',
+    texte: cle
+      ? 'Total de bacs de la journée. Laisser vide pour effacer le jour.'
+      : 'Pour une journée oubliée : la date, puis le total de bacs.',
+    cle,
+    total: jour ? totalJour(jour) : null,
+    choisirDate: !cle
+  });
+  if (!r) return;
+  if (!r.total) delete bacs[r.cle];
+  else {
+    const existant = bacs[r.cle] || { l: [], c: null };
+    // Les livraisons restent comptées ; seul le total est remplacé.
+    bacs[r.cle] = { l: existant.l, c: r.total };
+  }
+  saveBacs();
+  moisAffiche = new Date(dateDe(r.cle).getFullYear(), dateDe(r.cle).getMonth(), 1);
+  renderBacs();
+}
+
+function joursDuMois(mois) {
+  const prefixe = mois.getFullYear() + '-' + pad2(mois.getMonth() + 1) + '-';
+  return Object.keys(bacs)
+    .filter((k) => k.startsWith(prefixe) && totalJour(bacs[k]) > 0)
+    .sort()
+    .reverse();
+}
+
+function renderBacs() {
+  const maintenant = new Date();
+  const cle = aujourdhui();
+  const jour = bacs[cle];
+  const total = totalJour(jour);
+  const livraisons = jour ? jour.l.length : 0;
+
+  $('bacsJour').textContent = 'Aujourd’hui · ' + maintenant.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+  $('bacsTotal').textContent = String(total);
+  $('bacsSous').textContent = livraisons
+    ? livraisons + ' livraison' + (livraisons > 1 ? 's' : '') + (jour.c != null ? ' · total corrigé' : '')
+    : jour && jour.c != null ? 'total corrigé' : 'aucune livraison';
+
+  const remplissage = $('bacsRemplissage');
+  remplissage.style.width = Math.min(100, (total / 150) * 100) + '%';
+  remplissage.className = 'bacs-remplissage' + (palierAtteint(total) ? ' p' + palierAtteint(total) : '');
+
+  const paliers = document.createDocumentFragment();
+  PALIERS.forEach((p) => paliers.appendChild(el('div', 'bacs-palier' + (total >= p ? ' ok' : ''), (total >= p ? '✅ ' : '') + p)));
+  $('bacsPaliers').replaceChildren(paliers);
+
+  const prochain = PALIERS.find((p) => total < p);
+  $('bacsProchain').textContent = prochain
+    ? 'Encore ' + (prochain - total) + ' pour le palier ' + prochain
+    : '🏆 Tous les paliers atteints';
+
+  if (!$('bacsPave').childElementCount) {
+    PAVE.forEach((n) => {
+      const b = el('button', null, '+' + n);
+      b.type = 'button';
+      b.setAttribute('aria-label', 'Livraison de ' + n + ' bac' + (n > 1 ? 's' : ''));
+      b.addEventListener('click', () => ajouterLivraison(n));
+      $('bacsPave').appendChild(b);
+    });
+  }
+  $('bacsAnnuler').disabled = !livraisons;
+  const derniere = livraisons ? jour.l[jour.l.length - 1] : null;
+  $('bacsAnnuler').textContent = derniere ? '↩️ Annuler (+' + derniere + ')' : '↩️ Annuler';
+
+  // ---- récap du mois
+  if (!moisAffiche) moisAffiche = new Date(maintenant.getFullYear(), maintenant.getMonth(), 1);
+  $('bacsMoisTitre').textContent = moisAffiche.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+  $('bacsMoisSuiv').disabled =
+    moisAffiche.getFullYear() === maintenant.getFullYear() && moisAffiche.getMonth() === maintenant.getMonth();
+
+  const jours = joursDuMois(moisAffiche);
+  const totaux = jours.map((k) => totalJour(bacs[k]));
+  const somme = totaux.reduce((a, b) => a + b, 0);
+  const parPalier = Object.fromEntries(PALIERS.map((p) => [p, totaux.filter((t) => palierAtteint(t) === p).length]));
+
+  const bilan = document.createDocumentFragment();
+  const caseBilan = (valeur, libelle, large) => {
+    const c = el('div', 'bacs-case' + (large ? ' large' : ''));
+    c.append(el('strong', null, String(valeur)), el('span', null, libelle));
+    return c;
+  };
+  bilan.appendChild(caseBilan(somme, jours.length + ' jour' + (jours.length > 1 ? 's' : '') + ' · ' +
+    (jours.length ? Math.round(somme / jours.length) : 0) + ' bacs / jour en moyenne', true));
+  PALIERS.forEach((p) => bilan.appendChild(caseBilan(parPalier[p], 'prime ' + p)));
+  $('bacsBilan').replaceChildren(bilan);
+
+  const liste = document.createDocumentFragment();
+  if (!jours.length) liste.appendChild(el('div', 'bacs-vide', 'Aucun bac compté ce mois-ci.'));
+  jours.forEach((k) => {
+    const t = totalJour(bacs[k]);
+    const p = palierAtteint(t);
+    const ligne = el('button', 'bacs-ligne');
+    ligne.type = 'button';
+    ligne.append(
+      el('span', 'date', dateDe(k).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' }) + (bacs[k].c != null ? ' ✏️' : '')),
+      el('span', 'nb', t + ' bacs'),
+      el('span', 'prime' + (p ? ' ok' : ''), p ? '✅ ' + p : '—')
+    );
+    ligne.addEventListener('click', () => corrigerJour(k));
+    liste.appendChild(ligne);
+  });
+  const ajout = el('button', 'bacs-ligne', '➕ Saisir un jour oublié');
+  ajout.type = 'button';
+  ajout.style.display = 'block';
+  ajout.style.color = '#94a3b8';
+  ajout.addEventListener('click', () => corrigerJour(null));
+  liste.appendChild(ajout);
+  $('bacsJours').replaceChildren(liste);
+}
+
+function exporterBacs() {
+  const jours = joursDuMois(moisAffiche).reverse();
+  const nomMois = moisAffiche.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+  const lignes = [['Date', 'Livraisons', 'Bacs', 'Palier atteint', 'Total corrige'].join(';')];
+  jours.forEach((k) => {
+    const j = bacs[k];
+    const t = totalJour(j);
+    lignes.push([dateDe(k).toLocaleDateString('fr-FR'), j.l.length, t, palierAtteint(t) || '', j.c != null ? 'oui' : ''].join(';'));
+  });
+  const totaux = jours.map((k) => totalJour(bacs[k]));
+  lignes.push('');
+  lignes.push('Total du mois;;' + totaux.reduce((a, b) => a + b, 0));
+  PALIERS.forEach((p) => lignes.push('Jours prime ' + p + ';;' + totaux.filter((t) => palierAtteint(t) === p).length));
+
+  const blob = new Blob(['﻿' + lignes.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const lien = document.createElement('a');
+  lien.href = url;
+  lien.download = 'bacs-' + moisAffiche.getFullYear() + '-' + pad2(moisAffiche.getMonth() + 1) + '.csv';
+  document.body.appendChild(lien);
+  lien.click();
+  lien.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast('Récap de ' + nomMois + ' exporté');
+}
+
+$('bacsAnnuler').addEventListener('click', annulerDerniere);
+$('bacsAutre').addEventListener('click', autreNombre);
+$('bacsExport').addEventListener('click', exporterBacs);
+$('bacsMoisPrec').addEventListener('click', () => {
+  moisAffiche = new Date(moisAffiche.getFullYear(), moisAffiche.getMonth() - 1, 1);
+  renderBacs();
+});
+$('bacsMoisSuiv').addEventListener('click', () => {
+  moisAffiche = new Date(moisAffiche.getFullYear(), moisAffiche.getMonth() + 1, 1);
+  renderBacs();
+});
+
 /* ------------------------------ démarrage ------------------------------- */
 
 window.addEventListener('online', async () => {
@@ -3636,6 +3935,7 @@ document.addEventListener('visibilitychange', async () => {
     arreterSurveillance();
     return;
   }
+  if (onglet === 'bacs') renderBacs();
   if (!navigator.onLine || !getAccessKey()) return;
   prechaufferPosition();
 
