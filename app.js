@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '26/09 — iPhone';
+const VERSION = '26/09 — interphone 📟';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -2916,7 +2916,7 @@ function majInterphone(texte) {
 /** Interphone, bâtiment, étage : dans cet ordre de priorité, même écriture. */
 function detailsClient(c) {
   const details = [];
-  if (c.interphone) details.push(['🔔', 'Interphone', majInterphone(c.interphone)]);
+  if (c.interphone) details.push(['📟', 'Interphone', majInterphone(c.interphone)]);
   if (c.batiment) details.push(['🏢', 'Bâtiment', c.batiment]);
   if (c.etage) details.push(['⬆️', 'Étage', c.etage]);
   return details;

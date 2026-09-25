@@ -738,9 +738,10 @@ body.onglet-bacs .btn-add {
   transition: width 200ms;
 }
 
-.bacs-remplissage.p75 { background: #16a34a; }
-.bacs-remplissage.p100 { background: #ca8a04; }
-.bacs-remplissage.p150 { background: #db2777; }
+/* Bleue tant qu'aucun palier n'est atteint, verte dès le premier. */
+.bacs-remplissage.p75,
+.bacs-remplissage.p100,
+.bacs-remplissage.p150 { background: #16a34a; }
 
 .bacs-cran {
   position: absolute;
