@@ -60,6 +60,7 @@ et renvoyez le nouveau lien à l'équipe.
   _clients.js         table `clients` (créée automatiquement), validation
   photos/[id].js      GET · PUT · DELETE photo d'une fiche client (R2)
   stats.js            compteurs d'installation
+  parametres.js       réglages communs de la paie (clôtures, primes)
   ping.js             validation de clé
 schema.sql            tables D1
 tools/kv-to-sql.mjs   migration KV → D1
@@ -131,11 +132,20 @@ converti en net estimé avec un taux de cotisations réglable (22 % par
 défaut) et, en option, le taux personnel de prélèvement à la source.
 Montants et paliers : constantes `PALIERS` et `PRIMES_BRUT` dans `app.js`.
 
-Le récap suit la **période de paie**. La clôture changeant chaque mois, on
-saisit sa date exacte en touchant les dates de la période (« clôture
-confirmée ») ; la paie suivante commence le lendemain. Sans date saisie,
-un jour habituel réglable est utilisé (« clôture estimée » ; 31 = fin de
-mois).
+Le récap suit la **période de paie**. La clôture changeant chaque mois,
+l'administrateur saisit sa date exacte en touchant les dates de la période
+(« clôture confirmée ») ; elle vaut pour toute l'équipe et la paie suivante
+commence le lendemain. Sans date saisie, un jour habituel est utilisé
+(« clôture estimée » ; 31 = fin de mois).
+
+**Primes exceptionnelles** journalières, cumulables avec la prime de bacs :
+RCM (Roquebrune-Cap-Martin), GBT (Gambetta), DRL (Déroulède), CRN
+(Corniche). Le livreur coche celles du jour ; les montants bruts sont fixés
+par l'administrateur (⚙️ Réglages) pour toute l'équipe.
+
+Réglages communs (clôtures, jour habituel, montants) : route
+`/api/parametres`, lecture pour tous, écriture avec la clé d'administration,
+table `parametres` créée automatiquement.
 
 Les comptages restent **sur le téléphone** (stockage du navigateur) : rien
 n'est envoyé au serveur. Vider les données du site ou changer de téléphone

@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '25/09 — clôture par mois';
+const VERSION = '26/09 — primes exceptionnelles';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -3242,6 +3242,7 @@ function changerOnglet(nouveau) {
 
   renderList();
   if (surClients && getAccessKey() && navigator.onLine) loadClients();
+  if (onglet === 'bacs' && getAccessKey() && navigator.onLine) chargerParametres();
 }
 
 $('tabCodes').addEventListener('click', () => changerOnglet('codes'));
@@ -3649,11 +3650,78 @@ const TAUX_KEY = 'chall_bacs_taux_v1';
 // mois dont la date exacte n'a pas été saisie.
 let taux = { cotisations: 22, impot: 0, cloture: 31, ...readJson(TAUX_KEY, {}) };
 
-// Date de clôture exacte de chaque paie, quand la comptabilité l'annonce :
-// { 'AAAA-MM': 'AAAA-MM-JJ' } (mois de paie -> dernier jour compté).
-const CLOTURES_KEY = 'chall_bacs_clotures_v1';
-let clotures = readJson(CLOTURES_KEY, {});
+// Réglages communs à toute l'équipe, fixés par l'administrateur sur le
+// serveur, gardés en copie locale pour fonctionner hors ligne :
+// - clotures : { 'AAAA-MM': 'AAAA-MM-JJ' } (mois de paie -> dernier jour compté) ;
+// - clotureHabituelle : jour utilisé quand la date du mois n'est pas saisie ;
+// - primesExc : { RCM: { nom, montant } } montants bruts par jour.
+const PARAMS_KEY = 'chall_params_v1';
+let params = readJson(PARAMS_KEY, {});
+const clotures = () => params.clotures || {};
+// Ancien réglage local, repris tant que le serveur n'a rien.
+const clotureHabituelle = () => params.clotureHabituelle || taux.cloture || 31;
 const cleMois = (m) => m.getFullYear() + '-' + pad2(m.getMonth() + 1);
+const adminSurCetAppareil = () => Boolean(localStorage.getItem(ADMIN_KEY));
+
+// Primes exceptionnelles, journalières, cumulables avec la prime de bacs.
+const PRIMES_EXC = [
+  ['RCM', 'Roquebrune-Cap-Martin'],
+  ['GBT', 'Gambetta'],
+  ['DRL', 'Déroulède'],
+  ['CRN', 'Corniche']
+];
+const montantExc = (code) => ((params.primesExc || {})[code] || {}).montant || 0;
+const primesExcDuJour = (j) => (j && Array.isArray(j.x) ? j.x : []);
+const brutExcDuJour = (j) => primesExcDuJour(j).reduce((a, c) => a + montantExc(c), 0);
+/** Un jour sans livraison, sans total saisi et sans prime exceptionnelle n'a plus lieu d'exister. */
+const jourVide = (j) => !j.l.length && j.c == null && !primesExcDuJour(j).length;
+
+async function chargerParametres() {
+  try {
+    const data = await api('/api/parametres');
+    params = data.parametres || {};
+    writeJson(PARAMS_KEY, params);
+
+    // Premier passage d'un administrateur : les réglages faits sur ce
+    // téléphone avant le partage partent sur le serveur.
+    const anciennes = readJson('chall_bacs_clotures_v1', null);
+    if (adminSurCetAppareil() && (anciennes || taux.cloture < 31)) {
+      const envoi = {};
+      if (anciennes && !params.clotures) envoi.clotures = anciennes;
+      if (taux.cloture < 31 && !params.clotureHabituelle) envoi.clotureHabituelle = taux.cloture;
+      if (Object.keys(envoi).length) await enregistrerParametres(envoi, { silencieux: true });
+      try { localStorage.removeItem('chall_bacs_clotures_v1'); } catch { /* rien */ }
+    }
+  } catch {
+    /* hors ligne : on garde la copie locale */
+  }
+  // Une nouvelle clôture peut changer la paie en cours.
+  if (!moisChoisi) moisAffiche = null;
+  if (onglet === 'bacs') renderBacs();
+}
+
+/** Enregistre des réglages communs (administrateur seulement, réseau requis). */
+async function enregistrerParametres(modif, { silencieux = false } = {}) {
+  try {
+    const data = await api('/api/parametres', { method: 'PUT', body: JSON.stringify(modif) });
+    params = data.parametres || params;
+    writeJson(PARAMS_KEY, params);
+    if (onglet === 'bacs') renderBacs();
+    return true;
+  } catch (err) {
+    if (!silencieux) {
+      await showDialog({
+        title: 'Réglage non enregistré',
+        message: err.status === undefined
+          ? 'Pas de réseau : le réglage est partagé avec toute l’équipe, il faut être connecté.'
+          : err.message,
+        showCancel: false,
+        okText: 'Compris'
+      });
+    }
+    return false;
+  }
+}
 
 const euros = (v) => {
   const arrondi = Math.round(v * 100) / 100;
@@ -3666,6 +3734,8 @@ const netApresImpot = (brut) => netDe(brut) * (1 - taux.impot / 100);
 
 let bacs = readJson(BACS_KEY, {});
 let moisAffiche = null; // mois de paie affiché dans le récap (1er du mois)
+// Le livreur a choisi lui-même une autre période : on ne la lui change pas.
+let moisChoisi = false;
 
 const saveBacs = () => writeJson(BACS_KEY, bacs);
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -3721,13 +3791,48 @@ function ajouterLivraison(n) {
   renderBacs();
 }
 
+/** Coche ou décoche une prime exceptionnelle pour un jour. */
+function basculerExc(cle, code) {
+  const jour = bacs[cle] || { l: [], c: null };
+  const x = new Set(primesExcDuJour(jour));
+  const ajout = !x.has(code);
+  if (ajout) x.add(code);
+  else x.delete(code);
+  jour.x = PRIMES_EXC.map(([c]) => c).filter((c) => x.has(c));
+  bacs[cle] = jour;
+  if (jourVide(jour)) delete bacs[cle];
+  saveBacs();
+  if (navigator.vibrate) navigator.vibrate(15);
+  showToast((ajout ? 'Prime ' : 'Prime retirée : ') + code + (ajout && montantExc(code) ? ' · +' + euros(montantExc(code)) : ''));
+  renderBacs();
+}
+
+/** Rangée de pastilles RCM, GBT, DRL, CRN pour un jour. */
+function pastillesExc(cle, apres) {
+  const frag = document.createDocumentFragment();
+  const actives = primesExcDuJour(bacs[cle]);
+  PRIMES_EXC.forEach(([code, nom]) => {
+    const b = el('button', 'bacs-exc-btn' + (actives.includes(code) ? ' ok' : ''));
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(actives.includes(code)));
+    b.setAttribute('aria-label', 'Prime ' + nom);
+    b.append(el('strong', null, code), el('span', null, montantExc(code) ? euros(montantExc(code)) : nom));
+    b.addEventListener('click', () => {
+      basculerExc(cle, code);
+      if (apres) apres();
+    });
+    frag.appendChild(b);
+  });
+  return frag;
+}
+
 function annulerDerniere() {
   const cle = aujourdhui();
   const jour = bacs[cle];
   if (!jour || !jour.l.length) return;
   if (jour.l[jour.l.length - 1].base) return;
   const n = bacsDe(jour.l.pop());
-  if (!jour.l.length && jour.c == null) delete bacs[cle];
+  if (jourVide(jour)) delete bacs[cle];
   saveBacs();
   showToast('Livraison de ' + n + ' bac' + (n > 1 ? 's' : '') + ' annulée');
   renderBacs();
@@ -3809,12 +3914,11 @@ async function corrigerJour(cle) {
     choisirDate: !cle
   });
   if (!r) return;
-  if (!r.total) delete bacs[r.cle];
-  else {
-    const existant = bacs[r.cle] || { l: [], c: null };
-    // Les livraisons restent comptées ; seul le total est remplacé.
-    bacs[r.cle] = { l: existant.l, c: r.total };
-  }
+  const existant = bacs[r.cle] || { l: [], c: null };
+  // Les livraisons et les primes exceptionnelles restent ; seul le total est remplacé.
+  bacs[r.cle] = { ...existant, c: r.total || null };
+  if (!r.total) bacs[r.cle].l = [];
+  if (jourVide(bacs[r.cle])) delete bacs[r.cle];
   saveBacs();
   moisAffiche = moisDePaie(dateDe(r.cle));
   renderBacs();
@@ -3858,7 +3962,7 @@ function listeHistorique(cle, apres) {
       });
       if (!ok) return;
       jour.l.splice(i, 1);
-      if (!jour.l.length && jour.c == null) delete bacs[cle];
+      if (jourVide(jour)) delete bacs[cle];
       saveBacs();
       renderBacs();
       if (apres) apres();
@@ -3888,12 +3992,16 @@ function montrerJour(cle) {
   const h = el('h3', null, titre());
   h.style.textTransform = 'capitalize';
   const liste = el('div', 'bacs-histo-modal');
+  const exc = el('div', 'bacs-exc');
   const remplir = () => {
     h.textContent = titre();
+    exc.replaceChildren(pastillesExc(cle, remplir));
     liste.replaceChildren(listeHistorique(cle, remplir));
   };
   remplir();
-  box.append(h, liste);
+  const excTitre = el('p', 'bacs-aide', 'Primes exceptionnelles de ce jour');
+  excTitre.style.margin = '6px 0 6px';
+  box.append(h, excTitre, exc, liste);
 
   const fermer = () => { libererFond(); modal.remove(); };
   const barre = el('div', 'modal-btns');
@@ -3922,16 +4030,16 @@ function montrerJour(cle) {
 /** Dernier jour compté dans la paie d'un mois : date saisie, sinon jour habituel. */
 function finDePaie(mois) {
   const m = new Date(mois.getFullYear(), mois.getMonth(), 1);
-  const saisie = clotures[cleMois(m)];
+  const saisie = clotures()[cleMois(m)];
   if (saisie) return dateDe(saisie);
-  return new Date(m.getFullYear(), m.getMonth(), Math.min(taux.cloture, new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate()));
+  return new Date(m.getFullYear(), m.getMonth(), Math.min(clotureHabituelle(), new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate()));
 }
 
 function periodePaie(mois) {
   const fin = finDePaie(mois);
   const finPrec = finDePaie(new Date(mois.getFullYear(), mois.getMonth() - 1, 1));
   const debut = new Date(finPrec.getFullYear(), finPrec.getMonth(), finPrec.getDate() + 1);
-  return { debut, fin, exacte: Boolean(clotures[cleMois(mois)]) };
+  return { debut, fin, exacte: Boolean(clotures()[cleMois(mois)]) };
 }
 
 const nomDuMois = (m) => m.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
@@ -3958,7 +4066,7 @@ function joursDuMois(mois) {
   const de = cleJour(debut);
   const a = cleJour(fin);
   return Object.keys(bacs)
-    .filter((k) => k >= de && k <= a && totalJour(bacs[k]) > 0)
+    .filter((k) => k >= de && k <= a && (totalJour(bacs[k]) > 0 || primesExcDuJour(bacs[k]).length))
     .sort()
     .reverse();
 }
@@ -3983,6 +4091,8 @@ function renderBacs() {
   const paliers = document.createDocumentFragment();
   PALIERS.forEach((p) => paliers.appendChild(el('div', 'bacs-palier' + (total >= p ? ' ok' : ''), (total >= p ? '✅ ' : '') + p)));
   $('bacsPaliers').replaceChildren(paliers);
+
+  $('bacsExc').replaceChildren(pastillesExc(cle));
 
   const prochain = PALIERS.find((p) => total < p);
   $('bacsProchain').textContent = prochain
@@ -4011,8 +4121,8 @@ function renderBacs() {
   if (!moisAffiche) moisAffiche = paieEnCours;
   const { debut, fin } = periodePaie(moisAffiche);
   const court = (d) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
-  const exacte = Boolean(clotures[cleMois(moisAffiche)]);
-  const decalee = exacte || taux.cloture < 31 || Object.keys(clotures).length > 0;
+  const exacte = Boolean(clotures()[cleMois(moisAffiche)]);
+  const decalee = exacte || clotureHabituelle() < 31 || Object.keys(clotures()).length > 0;
   $('bacsMoisTitre').textContent = decalee ? paieDe(moisAffiche) : nomDuMois(moisAffiche);
   $('bacsMoisDates').textContent = 'du ' + court(debut) + ' au ' + court(fin) + ' · ' +
     (exacte ? '✅ clôture confirmée' : 'clôture estimée') + ' ✏️';
@@ -4033,27 +4143,36 @@ function renderBacs() {
   bilan.appendChild(caseBilan(somme, jours.length + ' jour' + (jours.length > 1 ? 's' : '') + ' · ' +
     (jours.length ? Math.round(somme / jours.length) : 0) + ' bacs / jour en moyenne', true));
   PALIERS.forEach((p) => bilan.appendChild(caseBilan(parPalier[p], 'prime ' + p + ' · ' + euros(parPalier[p] * PRIMES_BRUT[p]))));
+  // Primes exceptionnelles : nombre de jours et montant, pour chacune.
+  const parExc = Object.fromEntries(PRIMES_EXC.map(([c]) => [c, jours.filter((k) => primesExcDuJour(bacs[k]).includes(c)).length]));
+  PRIMES_EXC.forEach(([c]) => {
+    if (parExc[c]) bilan.appendChild(caseBilan(parExc[c], c + ' · ' + euros(parExc[c] * montantExc(c))));
+  });
   $('bacsBilan').replaceChildren(bilan);
 
   // Total des primes du mois : brut, net estimé, et net après impôt si renseigné.
-  const brut = PALIERS.reduce((a, p) => a + parPalier[p] * PRIMES_BRUT[p], 0);
+  const brutBacs = PALIERS.reduce((a, p) => a + parPalier[p] * PRIMES_BRUT[p], 0);
+  const brutExc = PRIMES_EXC.reduce((a, [c]) => a + parExc[c] * montantExc(c), 0);
+  const brut = brutBacs + brutExc;
   const primes = $('bacsPrimes');
   primes.replaceChildren(
     el('span', 'titre', 'Primes du mois'),
     el('strong', null, '≈ ' + euros(taux.impot ? netApresImpot(brut) : netDe(brut)) + ' net'),
-    el('span', 'detail', euros(brut) + ' brut · cotisations ' + pct(taux.cotisations) +
-      (taux.impot ? ' · impôt ' + pct(taux.impot) : '') + ' ✏️')
+    el('span', 'detail', euros(brut) + ' brut' + (brutExc ? ' (dont ' + euros(brutExc) + ' exceptionnelles)' : '') +
+      ' · cotisations ' + pct(taux.cotisations) + (taux.impot ? ' · impôt ' + pct(taux.impot) : '') + ' ✏️')
   );
 
   const liste = document.createDocumentFragment();
-  if (!jours.length) liste.appendChild(el('div', 'bacs-vide', 'Aucun bac compté ce mois-ci.'));
+  if (!jours.length) liste.appendChild(el('div', 'bacs-vide', 'Aucun bac compté sur cette période.'));
   jours.forEach((k) => {
     const t = totalJour(bacs[k]);
     const p = palierAtteint(t);
     const ligne = el('button', 'bacs-ligne');
     ligne.type = 'button';
+    const date = el('span', 'date', dateDe(k).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', ...(surDeuxMois ? { month: 'short' } : {}) }) + (bacs[k].c != null ? ' ✏️' : ''));
+    primesExcDuJour(bacs[k]).forEach((c) => date.appendChild(el('span', 'exc', c)));
     ligne.append(
-      el('span', 'date', dateDe(k).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', ...(surDeuxMois ? { month: 'short' } : {}) }) + (bacs[k].c != null ? ' ✏️' : '')),
+      date,
       el('span', 'nb', t + ' bacs'),
       el('span', 'prime' + (p ? ' ok' : ''), p ? '✅ ' + PRIMES_BRUT[p] + ' €' : '—')
     );
@@ -4075,20 +4194,29 @@ function exporterBacs() {
   const lignes = [
     paieDe(moisAffiche) + ' : du ' + debut.toLocaleDateString('fr-FR') + ' au ' + fin.toLocaleDateString('fr-FR'),
     '',
-    ['Date', 'Livraisons', 'Bacs', 'Palier atteint', 'Prime brute (EUR)', 'Total corrige'].join(';')
+    ['Date', 'Livraisons', 'Bacs', 'Palier atteint', 'Prime bacs (EUR)', 'Primes exceptionnelles', 'Montant exceptionnel (EUR)', 'Total corrige'].join(';')
   ];
   jours.forEach((k) => {
     const j = bacs[k];
     const t = totalJour(j);
     const p = palierAtteint(t);
-    lignes.push([dateDe(k).toLocaleDateString('fr-FR'), nbLivraisons(j), t, p || '', p ? PRIMES_BRUT[p] : 0, j.c != null ? 'oui' : ''].join(';'));
+    lignes.push([dateDe(k).toLocaleDateString('fr-FR'), nbLivraisons(j), t, p || '', p ? PRIMES_BRUT[p] : 0,
+      primesExcDuJour(j).join(' '), brutExcDuJour(j), j.c != null ? 'oui' : ''].join(';'));
   });
   const totaux = jours.map((k) => totalJour(bacs[k]));
   lignes.push('');
   lignes.push('Total du mois;;' + totaux.reduce((a, b) => a + b, 0));
   PALIERS.forEach((p) => lignes.push('Jours prime ' + p + ';;' + totaux.filter((t) => palierAtteint(t) === p).length));
-  const brut = totaux.reduce((a, t) => a + (palierAtteint(t) ? PRIMES_BRUT[palierAtteint(t)] : 0), 0);
+  PRIMES_EXC.forEach(([c, nom]) => {
+    const n = jours.filter((k) => primesExcDuJour(bacs[k]).includes(c)).length;
+    if (n) lignes.push('Jours prime ' + c + ' (' + nom + ');;' + n);
+  });
+  const brutBacs = totaux.reduce((a, t) => a + (palierAtteint(t) ? PRIMES_BRUT[palierAtteint(t)] : 0), 0);
+  const brutExc = jours.reduce((a, k) => a + brutExcDuJour(bacs[k]), 0);
+  const brut = brutBacs + brutExc;
   const nombre = (v) => v.toFixed(2).replace('.', ',');
+  lignes.push('Primes de bacs brutes (EUR);;' + nombre(brutBacs));
+  lignes.push('Primes exceptionnelles brutes (EUR);;' + nombre(brutExc));
   lignes.push('Primes brutes (EUR);;' + nombre(brut));
   lignes.push('Primes nettes estimees (EUR), cotisations ' + pct(taux.cotisations) + ';;' + nombre(netDe(brut)));
   if (taux.impot) lignes.push('Apres impot a la source ' + pct(taux.impot) + ' (EUR);;' + nombre(netApresImpot(brut)));
@@ -4105,37 +4233,63 @@ function exporterBacs() {
   showToast('Exporté : ' + paieDe(moisAffiche).toLowerCase());
 }
 
-/** Réglage des taux servant à estimer le net. */
+/** Petit champ texte avec son libellé, pour les fenêtres de réglage. */
+function champReglage(box, libelle, valeur, mode = 'decimal') {
+  const l = el('label', 'champ-label', libelle);
+  const i = document.createElement('input');
+  i.type = 'text';
+  i.inputMode = mode;
+  i.value = String(valeur).replace('.', ',');
+  box.append(l, i);
+  return i;
+}
+
+const lireNombre = (i, def, max = 100) => {
+  const v = parseFloat(i.value.replace(',', '.'));
+  return Number.isFinite(v) && v >= 0 && v < max ? v : def;
+};
+
+/**
+ * Réglages de la paie. Les taux sont personnels et restent sur le téléphone.
+ * Jour de clôture habituel et montants des primes exceptionnelles valent pour
+ * toute l'équipe : seul l'administrateur les modifie.
+ */
 function reglerTaux() {
+  const admin = adminSurCetAppareil();
   const modal = el('div', 'modal');
   modal.style.display = 'flex';
+  modal.style.alignItems = 'flex-start';
+  modal.style.overflowY = 'auto';
   const box = el('div', 'modal-content');
   box.appendChild(el('h3', null, 'Réglages de la paie'));
   const aide = el('p', null,
-    'Clôture habituelle : utilisée tant que la date exacte du mois n’est pas saisie (touchez les dates de la période pour la saisir ; 31 = fin de mois). ' +
-    'Les taux figurent sur votre fiche de paie : cotisations, environ 22 % pour un salarié non-cadre ; ' +
-    'impôt, votre taux de prélèvement à la source, ou 0 pour le net avant impôt.');
+    'Vos taux figurent sur votre fiche de paie : cotisations, environ 22 % pour un salarié non-cadre ; ' +
+    'impôt, votre taux de prélèvement à la source, ou 0 pour le net avant impôt. Ils restent sur ce téléphone.');
   aide.style.cssText = 'font-size:13px;color:#94a3b8;margin:4px 0 12px;line-height:1.4;';
   box.appendChild(aide);
 
-  const champ = (libelle, valeur) => {
-    const l = el('label', 'champ-label', libelle);
-    const i = document.createElement('input');
-    i.type = 'text';
-    i.inputMode = 'decimal';
-    i.value = String(valeur).replace('.', ',');
-    box.append(l, i);
-    return i;
-  };
-  const clo = champ('Jour de clôture habituel (1 à 31), si la date du mois n’est pas saisie', taux.cloture);
-  clo.inputMode = 'numeric';
-  const cot = champ('Cotisations salariales (%)', taux.cotisations);
-  const imp = champ('Impôt prélevé à la source (%)', taux.impot);
+  const cot = champReglage(box, 'Cotisations salariales (%)', taux.cotisations);
+  const imp = champReglage(box, 'Impôt prélevé à la source (%)', taux.impot);
 
-  const lire = (i, def) => {
-    const v = parseFloat(i.value.replace(',', '.'));
-    return Number.isFinite(v) && v >= 0 && v < 100 ? v : def;
-  };
+  const commun = el('h3', null, 'Pour toute l’équipe');
+  commun.style.cssText = 'font-size:15px;margin:8px 0 4px;';
+  box.appendChild(commun);
+  let clo = null;
+  const montants = {};
+  if (admin) {
+    clo = champReglage(box, 'Jour de clôture habituel (1 à 31), quand la date du mois n’est pas saisie', clotureHabituelle(), 'numeric');
+    PRIMES_EXC.forEach(([code, nom]) => {
+      montants[code] = champReglage(box, 'Prime ' + code + ' — ' + nom + ' (€ brut par jour)', montantExc(code));
+    });
+  } else {
+    const info = el('p', null,
+      'Fixés par l’administrateur : clôture habituelle ' +
+      (clotureHabituelle() < 31 ? 'le ' + clotureHabituelle() : 'en fin de mois') + ' ; primes ' +
+      PRIMES_EXC.map(([c]) => c + ' ' + (montantExc(c) ? euros(montantExc(c)) : 'à définir')).join(', ') + '.');
+    info.style.cssText = 'font-size:13px;color:#cbd5e1;line-height:1.4;margin-bottom:6px;';
+    box.appendChild(info);
+  }
+
   const fin = () => { libererFond(); modal.remove(); };
   const barre = el('div', 'modal-btns');
   barre.style.cssText = 'justify-content:flex-end;gap:10px;';
@@ -4144,15 +4298,21 @@ function reglerTaux() {
   annuler.addEventListener('click', fin);
   const ok = el('button', 'btn-save', 'Valider');
   ok.type = 'button';
-  ok.addEventListener('click', () => {
-    const jour = parseInt(clo.value, 10);
-    taux = {
-      cotisations: lire(cot, 22),
-      impot: lire(imp, 0),
-      cloture: Number.isFinite(jour) && jour >= 1 && jour <= 31 ? jour : 31
-    };
-    moisAffiche = null; // repart sur la paie en cours, selon la nouvelle clôture
+  ok.addEventListener('click', async () => {
+    taux = { ...taux, cotisations: lireNombre(cot, 22), impot: lireNombre(imp, 0) };
     writeJson(TAUX_KEY, taux);
+    if (admin) {
+      const jour = parseInt(clo.value, 10);
+      const primes = {};
+      PRIMES_EXC.forEach(([code, nom]) => { primes[code] = { nom, montant: lireNombre(montants[code], 0, 10000) }; });
+      const modif = { primesExc: primes };
+      if (jour >= 1 && jour <= 31) modif.clotureHabituelle = jour;
+      ok.disabled = true;
+      const reussi = await enregistrerParametres(modif);
+      ok.disabled = false;
+      if (!reussi) return;
+      moisAffiche = null; // la paie en cours peut avoir changé
+    }
     fin();
     renderBacs();
   });
@@ -4164,37 +4324,54 @@ function reglerTaux() {
 }
 
 $('bacsPrimes').addEventListener('click', reglerTaux);
-/** Saisir la date de clôture exacte de la paie affichée. */
+
+/**
+ * Date de clôture de la paie affichée. Elle vaut pour toute l'équipe :
+ * l'administrateur la saisit, les livreurs la consultent.
+ */
 function reglerCloture() {
+  const admin = adminSurCetAppareil();
   const mois = moisAffiche;
   const cle = cleMois(mois);
-  const { debut, fin } = periodePaie(mois);
+  const { debut, fin, exacte } = periodePaie(mois);
 
   const modal = el('div', 'modal');
   modal.style.display = 'flex';
   const box = el('div', 'modal-content');
   box.appendChild(el('h3', null, 'Clôture de la ' + paieDe(mois).replace('Paie', 'paie')));
-  const aide = el('p', null,
-    'Dernier jour compté dans cette paie, tel que la comptabilité l’annonce. Les jours suivants passent sur la paie d’après. ' +
-    'Sans date saisie, le jour habituel (' + (taux.cloture < 31 ? 'le ' + taux.cloture : 'fin de mois') + ') est utilisé.');
+  const aide = el('p', null, admin
+    ? 'Dernier jour compté dans cette paie, tel que la comptabilité l’annonce. Enregistrée pour toute l’équipe. ' +
+      'Sans date saisie, le jour habituel (' + (clotureHabituelle() < 31 ? 'le ' + clotureHabituelle() : 'fin de mois') + ') est utilisé.'
+    : exacte
+      ? 'Date fixée par l’administrateur pour toute l’équipe.'
+      : 'Date pas encore annoncée : le jour habituel (' + (clotureHabituelle() < 31 ? 'le ' + clotureHabituelle() : 'fin de mois') +
+        ') est utilisé en attendant. L’administrateur la saisira pour toute l’équipe.');
   aide.style.cssText = 'font-size:13px;color:#94a3b8;margin:4px 0 12px;line-height:1.4;';
   box.appendChild(aide);
 
-  const debutTexte = el('p', null, 'Début de la période : ' + debut.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }));
-  debutTexte.style.cssText = 'font-size:13px;color:#cbd5e1;margin-bottom:6px;';
-  box.appendChild(debutTexte);
+  const lignes = el('p', null,
+    'Du ' + debut.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) +
+    (admin ? '' : ' au ' + fin.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })));
+  lignes.style.cssText = 'font-size:14px;color:#e2e8f0;margin-bottom:6px;';
+  box.appendChild(lignes);
 
-  const champ = document.createElement('input');
-  champ.type = 'date';
-  champ.value = cleJour(fin);
-  champ.min = cleJour(debut);
-  box.appendChild(champ);
+  let champ = null;
   const erreur = el('p', 'gate-error', '');
-  box.appendChild(erreur);
+  if (admin) {
+    const libelle = el('label', 'champ-label', 'Au (dernier jour compté) :');
+    champ = document.createElement('input');
+    champ.type = 'date';
+    champ.className = 'champ-date';
+    champ.value = cleJour(fin);
+    const premier = new Date(mois.getFullYear(), mois.getMonth(), 1);
+    champ.min = cleJour(debut > premier ? debut : premier);
+    champ.max = cleJour(new Date(mois.getFullYear(), mois.getMonth() + 1, 0));
+    // Toute la zone ouvre le calendrier, pas seulement la petite icône.
+    champ.addEventListener('click', () => { try { champ.showPicker(); } catch { /* ancien navigateur */ } });
+    box.append(libelle, champ, erreur);
+  }
 
   const fermer = () => { libererFond(); modal.remove(); };
-  const appliquer = () => { writeJson(CLOTURES_KEY, clotures); fermer(); moisAffiche = mois; renderBacs(); };
-
   const barre = el('div', 'modal-btns');
   const gauche = el('div', 'modal-btns-left');
   const droite = el('div', 'modal-btns-right');
@@ -4202,29 +4379,55 @@ function reglerCloture() {
   reglages.type = 'button';
   reglages.addEventListener('click', () => { fermer(); reglerTaux(); });
   gauche.appendChild(reglages);
-  if (clotures[cle]) {
+
+  const sauver = async (nouvelles, message) => {
+    const reussi = await enregistrerParametres({ clotures: nouvelles });
+    if (!reussi) return;
+    fermer();
+    moisAffiche = mois;
+    renderBacs();
+    if (message) showToast(message);
+  };
+
+  if (admin && clotures()[cle]) {
     const oublier = el('button', 'btn-cancel', 'Effacer');
     oublier.type = 'button';
-    oublier.addEventListener('click', () => { delete clotures[cle]; appliquer(); });
+    oublier.addEventListener('click', () => {
+      const nouvelles = { ...clotures() };
+      delete nouvelles[cle];
+      sauver(nouvelles, 'Clôture effacée');
+    });
     gauche.appendChild(oublier);
   }
-  const annuler = el('button', 'btn-cancel', 'Annuler');
-  annuler.type = 'button';
-  annuler.addEventListener('click', fermer);
-  const ok = el('button', 'btn-save', 'Valider');
-  ok.type = 'button';
-  ok.addEventListener('click', () => {
-    if (!champ.value) return;
-    const date = dateDe(champ.value);
-    // La période doit rester entre la clôture précédente et la suivante.
-    const suivante = finDePaie(new Date(mois.getFullYear(), mois.getMonth() + 1, 1));
-    if (date < debut) { erreur.textContent = 'La clôture doit tomber après le ' + debut.toLocaleDateString('fr-FR') + '.'; return; }
-    if (date >= suivante) { erreur.textContent = 'La clôture doit tomber avant celle de la paie suivante (' + suivante.toLocaleDateString('fr-FR') + ').'; return; }
-    clotures[cle] = champ.value;
-    appliquer();
-    showToast('Clôture enregistrée : ' + date.toLocaleDateString('fr-FR'));
-  });
-  droite.append(annuler, ok);
+
+  if (admin) {
+    const annuler = el('button', 'btn-cancel', 'Annuler');
+    annuler.type = 'button';
+    annuler.addEventListener('click', fermer);
+    const ok = el('button', 'btn-save', 'Valider');
+    ok.type = 'button';
+    ok.addEventListener('click', async () => {
+      if (!champ.value) return;
+      const date = dateDe(champ.value);
+      // La période doit rester entre la clôture précédente et la suivante.
+      const suivante = finDePaie(new Date(mois.getFullYear(), mois.getMonth() + 1, 1));
+      if (date.getFullYear() !== mois.getFullYear() || date.getMonth() !== mois.getMonth()) {
+        erreur.textContent = 'La clôture de la ' + paieDe(mois).replace('Paie', 'paie') + ' doit tomber en ' + nomDuMois(mois) + '.';
+        return;
+      }
+      if (date < debut) { erreur.textContent = 'La clôture doit tomber après le ' + debut.toLocaleDateString('fr-FR') + '.'; return; }
+      if (date >= suivante) { erreur.textContent = 'La clôture doit tomber avant celle de la paie suivante (' + suivante.toLocaleDateString('fr-FR') + ').'; return; }
+      ok.disabled = true;
+      await sauver({ ...clotures(), [cle]: champ.value }, 'Clôture enregistrée pour toute l’équipe : ' + date.toLocaleDateString('fr-FR'));
+      ok.disabled = false;
+    });
+    droite.append(annuler, ok);
+  } else {
+    const ok = el('button', 'btn-save', 'Fermer');
+    ok.type = 'button';
+    ok.addEventListener('click', fermer);
+    droite.append(ok);
+  }
   barre.append(gauche, droite);
   box.appendChild(barre);
   modal.appendChild(box);
@@ -4237,10 +4440,12 @@ $('bacsAnnuler').addEventListener('click', annulerDerniere);
 $('bacsAutre').addEventListener('click', autreNombre);
 $('bacsExport').addEventListener('click', exporterBacs);
 $('bacsMoisPrec').addEventListener('click', () => {
+  moisChoisi = true;
   moisAffiche = new Date(moisAffiche.getFullYear(), moisAffiche.getMonth() - 1, 1);
   renderBacs();
 });
 $('bacsMoisSuiv').addEventListener('click', () => {
+  moisChoisi = true;
   moisAffiche = new Date(moisAffiche.getFullYear(), moisAffiche.getMonth() + 1, 1);
   renderBacs();
 });
@@ -4251,6 +4456,7 @@ window.addEventListener('online', async () => {
   if (await flushOutbox()) {
     await loadData({ silent: true });
     await loadClients();
+    await chargerParametres();
   }
 });
 window.addEventListener('offline', () => updateStatus());
@@ -4277,6 +4483,7 @@ document.addEventListener('visibilitychange', async () => {
   if (await flushOutbox()) {
     await loadData({ silent: true });
     await loadClients();
+    await chargerParametres();
   }
 });
 
@@ -4303,5 +4510,6 @@ if ('serviceWorker' in navigator) {
   await flushOutbox();
   await loadData();
   await loadClients();
+  await chargerParametres();
   trackDeviceInstallation();
 })();
