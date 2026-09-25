@@ -131,9 +131,11 @@ converti en net estimé avec un taux de cotisations réglable (22 % par
 défaut) et, en option, le taux personnel de prélèvement à la source.
 Montants et paliers : constantes `PALIERS` et `PRIMES_BRUT` dans `app.js`.
 
-Le récap suit la **période de paie** : avec un jour de clôture réglé au 20,
-la paie d'octobre va du 21 septembre au 20 octobre (réglage en touchant le
-titre de la période ; 31 = mois calendaire).
+Le récap suit la **période de paie**. La clôture changeant chaque mois, on
+saisit sa date exacte en touchant les dates de la période (« clôture
+confirmée ») ; la paie suivante commence le lendemain. Sans date saisie,
+un jour habituel réglable est utilisé (« clôture estimée » ; 31 = fin de
+mois).
 
 Les comptages restent **sur le téléphone** (stockage du navigateur) : rien
 n'est envoyé au serveur. Vider les données du site ou changer de téléphone
