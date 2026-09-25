@@ -845,7 +845,6 @@ body.onglet-bacs .btn-add {
 
 .bacs-mois-tete h3 {
   font-size: 17px;
-  text-transform: capitalize;
 }
 
 .bacs-mois-tete button {
@@ -1059,4 +1058,24 @@ body.onglet-bacs .btn-add {
 .bacs-primes .detail {
   font-size: 12px;
   color: #bbf7d0;
+}
+
+.bacs-periode {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: center;
+}
+
+.bacs-periode h3::first-letter {
+  text-transform: uppercase;
+}
+
+.bacs-periode span {
+  display: block;
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 2px;
 }

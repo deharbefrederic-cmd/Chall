@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '25/09 — primes en net';
+const VERSION = '25/09 — période de paie';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -3645,7 +3645,8 @@ const PRIMES_BRUT = { 75: 15, 100: 30, 150: 60 };
 // non-cadre) et, en option, le taux personnel de prélèvement à la source.
 // Réglables : ils figurent sur la fiche de paie.
 const TAUX_KEY = 'chall_bacs_taux_v1';
-let taux = { cotisations: 22, impot: 0, ...readJson(TAUX_KEY, {}) };
+// cloture : dernier jour compté dans la paie du mois (31 = fin de mois).
+let taux = { cotisations: 22, impot: 0, cloture: 31, ...readJson(TAUX_KEY, {}) };
 
 const euros = (v) => {
   const arrondi = Math.round(v * 100) / 100;
@@ -3657,7 +3658,7 @@ const netDe = (brut) => brut * (1 - taux.cotisations / 100);
 const netApresImpot = (brut) => netDe(brut) * (1 - taux.impot / 100);
 
 let bacs = readJson(BACS_KEY, {});
-let moisAffiche = null; // premier jour du mois affiché dans le récap
+let moisAffiche = null; // mois de paie affiché dans le récap (1er du mois)
 
 const saveBacs = () => writeJson(BACS_KEY, bacs);
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -3808,7 +3809,7 @@ async function corrigerJour(cle) {
     bacs[r.cle] = { l: existant.l, c: r.total };
   }
   saveBacs();
-  moisAffiche = new Date(dateDe(r.cle).getFullYear(), dateDe(r.cle).getMonth(), 1);
+  moisAffiche = moisDePaie(dateDe(r.cle));
   renderBacs();
 }
 
@@ -3906,10 +3907,38 @@ function montrerJour(cle) {
   verrouillerFond();
 }
 
+/**
+ * Période de paie d'un mois : avec une clôture le 20, la paie d'octobre
+ * compte du 21 septembre au 20 octobre. Clôture 31 = mois calendaire.
+ * Un mois plus court que le jour de clôture se termine à son dernier jour.
+ */
+function periodePaie(mois) {
+  const finDe = (a, m) => new Date(a, m, Math.min(taux.cloture, new Date(a, m + 1, 0).getDate()));
+  const fin = finDe(mois.getFullYear(), mois.getMonth());
+  const finPrec = finDe(mois.getFullYear(), mois.getMonth() - 1);
+  const debut = new Date(finPrec.getFullYear(), finPrec.getMonth(), finPrec.getDate() + 1);
+  return { debut, fin };
+}
+
+const nomDuMois = (m) => m.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+/** « Paie de septembre », « Paie d'octobre », « Paie d'août ». */
+const paieDe = (m) => {
+  const nom = nomDuMois(m);
+  return (/^[aeiouy]/i.test(nom) ? "Paie d'" : 'Paie de ') + nom;
+};
+
+/** Mois de paie auquel appartient une date. */
+function moisDePaie(date) {
+  const mois = new Date(date.getFullYear(), date.getMonth(), 1);
+  return date > periodePaie(mois).fin ? new Date(date.getFullYear(), date.getMonth() + 1, 1) : mois;
+}
+
 function joursDuMois(mois) {
-  const prefixe = mois.getFullYear() + '-' + pad2(mois.getMonth() + 1) + '-';
+  const { debut, fin } = periodePaie(mois);
+  const de = cleJour(debut);
+  const a = cleJour(fin);
   return Object.keys(bacs)
-    .filter((k) => k.startsWith(prefixe) && totalJour(bacs[k]) > 0)
+    .filter((k) => k >= de && k <= a && totalJour(bacs[k]) > 0)
     .sort()
     .reverse();
 }
@@ -3958,10 +3987,14 @@ function renderBacs() {
   $('bacsHistoListe').replaceChildren(listeHistorique(cle));
 
   // ---- récap du mois
-  if (!moisAffiche) moisAffiche = new Date(maintenant.getFullYear(), maintenant.getMonth(), 1);
-  $('bacsMoisTitre').textContent = moisAffiche.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-  $('bacsMoisSuiv').disabled =
-    moisAffiche.getFullYear() === maintenant.getFullYear() && moisAffiche.getMonth() === maintenant.getMonth();
+  const paieEnCours = moisDePaie(maintenant);
+  if (!moisAffiche) moisAffiche = paieEnCours;
+  const { debut, fin } = periodePaie(moisAffiche);
+  const court = (d) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
+  $('bacsMoisTitre').textContent = taux.cloture < 31 ? paieDe(moisAffiche) : nomDuMois(moisAffiche);
+  $('bacsMoisDates').textContent = 'du ' + court(debut) + ' au ' + court(fin) + ' · clôture ' +
+    (taux.cloture < 31 ? 'le ' + taux.cloture : 'fin de mois') + ' ✏️';
+  $('bacsMoisSuiv').disabled = moisAffiche >= paieEnCours;
 
   const jours = joursDuMois(moisAffiche);
   const totaux = jours.map((k) => totalJour(bacs[k]));
@@ -4015,8 +4048,12 @@ function renderBacs() {
 
 function exporterBacs() {
   const jours = joursDuMois(moisAffiche).reverse();
-  const nomMois = moisAffiche.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-  const lignes = [['Date', 'Livraisons', 'Bacs', 'Palier atteint', 'Prime brute (EUR)', 'Total corrige'].join(';')];
+  const { debut, fin } = periodePaie(moisAffiche);
+  const lignes = [
+    paieDe(moisAffiche) + ' : du ' + debut.toLocaleDateString('fr-FR') + ' au ' + fin.toLocaleDateString('fr-FR'),
+    '',
+    ['Date', 'Livraisons', 'Bacs', 'Palier atteint', 'Prime brute (EUR)', 'Total corrige'].join(';')
+  ];
   jours.forEach((k) => {
     const j = bacs[k];
     const t = totalJour(j);
@@ -4042,7 +4079,7 @@ function exporterBacs() {
   lien.click();
   lien.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  showToast('Récap de ' + nomMois + ' exporté');
+  showToast('Exporté : ' + paieDe(moisAffiche).toLowerCase());
 }
 
 /** Réglage des taux servant à estimer le net. */
@@ -4050,10 +4087,11 @@ function reglerTaux() {
   const modal = el('div', 'modal');
   modal.style.display = 'flex';
   const box = el('div', 'modal-content');
-  box.appendChild(el('h3', null, 'Calcul du net'));
+  box.appendChild(el('h3', null, 'Réglages de la paie'));
   const aide = el('p', null,
-    'Les deux taux figurent sur votre fiche de paie. Cotisations : environ 22 % pour un salarié non-cadre. ' +
-    'Impôt : votre taux de prélèvement à la source, ou 0 pour le net avant impôt.');
+    'Clôture : dernier jour compté dans la paie du mois (31 = fin de mois). Les jours suivants passent sur la paie suivante. ' +
+    'Les taux figurent sur votre fiche de paie : cotisations, environ 22 % pour un salarié non-cadre ; ' +
+    'impôt, votre taux de prélèvement à la source, ou 0 pour le net avant impôt.');
   aide.style.cssText = 'font-size:13px;color:#94a3b8;margin:4px 0 12px;line-height:1.4;';
   box.appendChild(aide);
 
@@ -4066,6 +4104,8 @@ function reglerTaux() {
     box.append(l, i);
     return i;
   };
+  const clo = champ('Jour de clôture de la paie (1 à 31)', taux.cloture);
+  clo.inputMode = 'numeric';
   const cot = champ('Cotisations salariales (%)', taux.cotisations);
   const imp = champ('Impôt prélevé à la source (%)', taux.impot);
 
@@ -4082,7 +4122,13 @@ function reglerTaux() {
   const ok = el('button', 'btn-save', 'Valider');
   ok.type = 'button';
   ok.addEventListener('click', () => {
-    taux = { cotisations: lire(cot, 22), impot: lire(imp, 0) };
+    const jour = parseInt(clo.value, 10);
+    taux = {
+      cotisations: lire(cot, 22),
+      impot: lire(imp, 0),
+      cloture: Number.isFinite(jour) && jour >= 1 && jour <= 31 ? jour : 31
+    };
+    moisAffiche = null; // repart sur la paie en cours, selon la nouvelle clôture
     writeJson(TAUX_KEY, taux);
     fin();
     renderBacs();
@@ -4095,6 +4141,7 @@ function reglerTaux() {
 }
 
 $('bacsPrimes').addEventListener('click', reglerTaux);
+$('bacsPeriode').addEventListener('click', reglerTaux);
 $('bacsAnnuler').addEventListener('click', annulerDerniere);
 $('bacsAutre').addEventListener('click', autreNombre);
 $('bacsExport').addEventListener('click', exporterBacs);
