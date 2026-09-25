@@ -1,8 +1,9 @@
-import { json, estAdmin, readJson } from './_lib.js';
+import { json, estAdmin, readJson, rateLimit, ipBucket, deviceNom } from './_lib.js';
 
-// Réglages communs à toute l'équipe, fixés par l'administrateur :
-// dates de clôture de la paie et montants des primes exceptionnelles.
-// Tout le monde les lit ; seul l'administrateur les modifie.
+// Réglages communs à toute l'équipe :
+// - dates de clôture de la paie : tout livreur peut les saisir (celui qui
+//   apprend la date la donne aux autres) ; qui et quand sont notés ;
+// - montants des primes exceptionnelles : administrateur seulement.
 
 let tablePrete = false;
 async function assurerTable(db) {
@@ -57,14 +58,22 @@ export async function onRequestGet(context) {
 }
 
 export async function onRequestPut(context) {
-  if (!estAdmin(context.request, context.env)) {
-    return json({ error: 'forbidden', message: "Réservé à l'administrateur." }, 403);
-  }
-  const body = await readJson(context.request);
+  const { request, env } = context;
+  const body = await readJson(request);
   if (!body) return json({ error: 'bad_request', message: 'Corps de requête illisible.' }, 400);
 
-  const db = context.env.DB;
+  if (body.primesExc !== undefined && !estAdmin(request, env)) {
+    return json({ error: 'forbidden', message: "Les montants des primes sont réservés à l'administrateur." }, 403);
+  }
+
+  const db = env.DB;
+  const limit = await rateLimit(db, ipBucket(request, 'write'), 60, 3600);
+  if (!limit.ok) {
+    return json({ error: 'rate_limited', message: 'Trop de modifications. Réessayez dans un moment.' }, 429,
+      { 'Retry-After': String(limit.retryAfter) });
+  }
   await assurerTable(db);
+  const avant = await lire(db);
   const ecrire = (cle, valeur) =>
     db.prepare(
       `INSERT INTO parametres (cle, valeur) VALUES (?1, ?2)
@@ -76,6 +85,15 @@ export async function onRequestPut(context) {
     const c = validerClotures(body.clotures);
     if (!c) return json({ error: 'bad_request', message: 'Dates de clôture invalides.' }, 400);
     lot.push(ecrire('clotures', c));
+
+    // Qui a saisi, modifié ou effacé chaque clôture, et quand.
+    const anciennes = avant.clotures || {};
+    const suivi = { ...(avant.cloturesMaj || {}) };
+    const par = deviceNom(request) || (estAdmin(request, env) ? 'administrateur' : 'un livreur');
+    for (const mois of new Set([...Object.keys(anciennes), ...Object.keys(c)])) {
+      if (anciennes[mois] !== c[mois]) suivi[mois] = { par, le: Date.now(), efface: !c[mois] };
+    }
+    lot.push(ecrire('cloturesMaj', suivi));
   }
   if (body.clotureHabituelle !== undefined) {
     const j = parseInt(body.clotureHabituelle, 10);

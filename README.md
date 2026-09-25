@@ -133,9 +133,10 @@ défaut) et, en option, le taux personnel de prélèvement à la source.
 Montants et paliers : constantes `PALIERS` et `PRIMES_BRUT` dans `app.js`.
 
 Le récap suit la **période de paie**. La clôture changeant chaque mois,
-l'administrateur saisit sa date exacte en touchant les dates de la période
-(« clôture confirmée ») ; elle vaut pour toute l'équipe et la paie suivante
-commence le lendemain. Sans date saisie, un jour habituel est utilisé
+n'importe quel livreur saisit sa date exacte en touchant les dates de la
+période (« clôture confirmée ») ; elle vaut pour toute l'équipe, la paie
+suivante commence le lendemain, et la fenêtre indique qui l'a saisie et
+quand. Modifier ou effacer une date existante demande une confirmation. Sans date saisie, un jour habituel est utilisé
 (« clôture estimée » ; 31 = fin de mois).
 
 **Primes exceptionnelles** journalières, cumulables avec la prime de bacs :
@@ -144,8 +145,9 @@ RCM (Roquebrune-Cap-Martin), GBT (Gambetta), DRL (Déroulède), CRN
 l'administrateur peut changer les montants (⚙️ Réglages) pour toute l'équipe.
 
 Réglages communs (clôtures, jour habituel, montants) : route
-`/api/parametres`, lecture pour tous, écriture avec la clé d'administration,
-table `parametres` créée automatiquement.
+`/api/parametres`, table `parametres` créée automatiquement. Clôtures et
+jour habituel modifiables par tous ; montants des primes avec la clé
+d'administration seulement.
 
 Les comptages restent **sur le téléphone** (stockage du navigateur) : rien
 n'est envoyé au serveur. Vider les données du site ou changer de téléphone

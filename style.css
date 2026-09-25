@@ -1086,7 +1086,27 @@ body.onglet-bacs .btn-add {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
-  margin: 12px 0 2px;
+}
+
+.bacs-exc-bloc {
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid #4c1d95;
+  border-radius: 12px;
+  background: #1e1b2e;
+}
+
+.bacs-exc-bloc h4 {
+  font-size: 15px;
+  color: #e9d5ff;
+  margin-bottom: 4px;
+}
+
+.bacs-exc-bloc p {
+  font-size: 12px;
+  color: #a1a1c2;
+  line-height: 1.4;
+  margin-bottom: 10px;
 }
 
 .bacs-exc-btn {

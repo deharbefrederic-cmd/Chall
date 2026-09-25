@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '26/09 — primes exc. 15 €';
+const VERSION = '26/09 — clôture pour tous';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -3719,7 +3719,7 @@ async function enregistrerParametres(modif, { silencieux = false } = {}) {
       await showDialog({
         title: 'Réglage non enregistré',
         message: err.status === undefined
-          ? 'Pas de réseau : le réglage est partagé avec toute l’équipe, il faut être connecté.'
+          ? 'Pas de réseau : ce réglage est partagé avec toute l’équipe, il faut être connecté.'
           : err.message,
         showCancel: false,
         okText: 'Compris'
@@ -3822,7 +3822,8 @@ function pastillesExc(cle, apres) {
     b.type = 'button';
     b.setAttribute('aria-pressed', String(actives.includes(code)));
     b.setAttribute('aria-label', 'Prime ' + nom);
-    b.append(el('strong', null, code), el('span', null, montantExc(code) ? euros(montantExc(code)) : nom));
+    // Le nom du secteur sous le code : on sait tout de suite ce qu'on coche.
+    b.append(el('strong', null, (actives.includes(code) ? '✓ ' : '') + code), el('span', null, nom));
     b.addEventListener('click', () => {
       basculerExc(cle, code);
       if (apres) apres();
@@ -4099,6 +4100,10 @@ function renderBacs() {
   $('bacsPaliers').replaceChildren(paliers);
 
   $('bacsExc').replaceChildren(pastillesExc(cle));
+  const montants = [...new Set(PRIMES_EXC.map(([c]) => montantExc(c)))];
+  $('bacsExcAide').textContent = 'Touchez le secteur où vous avez livré aujourd’hui : ' +
+    (montants.length === 1 ? '+' + euros(montants[0]) + ' brut chacun' : 'montant brut par secteur') +
+    ', en plus de la prime de bacs. Plusieurs possibles.';
 
   const prochain = PALIERS.find((p) => total < p);
   $('bacsProchain').textContent = prochain
@@ -4280,18 +4285,17 @@ function reglerTaux() {
   const commun = el('h3', null, 'Pour toute l’équipe');
   commun.style.cssText = 'font-size:15px;margin:8px 0 4px;';
   box.appendChild(commun);
-  let clo = null;
+  const clo = champReglage(box, 'Jour de clôture habituel (1 à 31), quand la date du mois n’est pas saisie', clotureHabituelle(), 'numeric');
+  const cloAvant = clotureHabituelle();
   const montants = {};
   if (admin) {
-    clo = champReglage(box, 'Jour de clôture habituel (1 à 31), quand la date du mois n’est pas saisie', clotureHabituelle(), 'numeric');
     PRIMES_EXC.forEach(([code, nom]) => {
       montants[code] = champReglage(box, 'Prime ' + code + ' — ' + nom + ' (€ brut par jour)', montantExc(code));
     });
   } else {
     const info = el('p', null,
-      'Fixés par l’administrateur : clôture habituelle ' +
-      (clotureHabituelle() < 31 ? 'le ' + clotureHabituelle() : 'en fin de mois') + ' ; primes ' +
-      PRIMES_EXC.map(([c]) => c + ' ' + (montantExc(c) ? euros(montantExc(c)) : 'à définir')).join(', ') + '.');
+      'Montants des primes exceptionnelles, fixés par l’administrateur : ' +
+      PRIMES_EXC.map(([c]) => c + ' ' + euros(montantExc(c))).join(', ') + ' brut par jour.');
     info.style.cssText = 'font-size:13px;color:#cbd5e1;line-height:1.4;margin-bottom:6px;';
     box.appendChild(info);
   }
@@ -4307,12 +4311,15 @@ function reglerTaux() {
   ok.addEventListener('click', async () => {
     taux = { ...taux, cotisations: lireNombre(cot, 22), impot: lireNombre(imp, 0) };
     writeJson(TAUX_KEY, taux);
+    const jour = parseInt(clo.value, 10);
+    const modif = {};
+    if (jour >= 1 && jour <= 31 && jour !== cloAvant) modif.clotureHabituelle = jour;
     if (admin) {
-      const jour = parseInt(clo.value, 10);
       const primes = {};
-      PRIMES_EXC.forEach(([code, nom]) => { primes[code] = { nom, montant: lireNombre(montants[code], 0, 10000) }; });
-      const modif = { primesExc: primes };
-      if (jour >= 1 && jour <= 31) modif.clotureHabituelle = jour;
+      PRIMES_EXC.forEach(([code, nom]) => { primes[code] = { nom, montant: lireNombre(montants[code], 15, 10000) }; });
+      modif.primesExc = primes;
+    }
+    if (Object.keys(modif).length) {
       ok.disabled = true;
       const reussi = await enregistrerParametres(modif);
       ok.disabled = false;
@@ -4336,46 +4343,47 @@ $('bacsPrimes').addEventListener('click', reglerTaux);
  * l'administrateur la saisit, les livreurs la consultent.
  */
 function reglerCloture() {
-  const admin = adminSurCetAppareil();
   const mois = moisAffiche;
   const cle = cleMois(mois);
-  const { debut, fin, exacte } = periodePaie(mois);
+  const { debut, fin } = periodePaie(mois);
+  const suivi = (params.cloturesMaj || {})[cle];
 
   const modal = el('div', 'modal');
   modal.style.display = 'flex';
   const box = el('div', 'modal-content');
   box.appendChild(el('h3', null, 'Clôture de la ' + paieDe(mois).replace('Paie', 'paie')));
-  const aide = el('p', null, admin
-    ? 'Dernier jour compté dans cette paie, tel que la comptabilité l’annonce. Enregistrée pour toute l’équipe. ' +
-      'Sans date saisie, le jour habituel (' + (clotureHabituelle() < 31 ? 'le ' + clotureHabituelle() : 'fin de mois') + ') est utilisé.'
-    : exacte
-      ? 'Date fixée par l’administrateur pour toute l’équipe.'
-      : 'Date pas encore annoncée : le jour habituel (' + (clotureHabituelle() < 31 ? 'le ' + clotureHabituelle() : 'fin de mois') +
-        ') est utilisé en attendant. L’administrateur la saisira pour toute l’équipe.');
+  const aide = el('p', null,
+    'Dernier jour compté dans cette paie, tel que la comptabilité l’annonce. La date est la même pour toute l’équipe : ' +
+    'la saisir ou la corriger ici la change pour tous. Sans date saisie, le jour habituel (' +
+    (clotureHabituelle() < 31 ? 'le ' + clotureHabituelle() : 'fin de mois') + ') est utilisé.');
   aide.style.cssText = 'font-size:13px;color:#94a3b8;margin:4px 0 12px;line-height:1.4;';
   box.appendChild(aide);
 
+  if (suivi) {
+    const trace = el('p', null, (suivi.efface ? 'Effacée' : 'Saisie') + ' par ' + suivi.par + ' le ' +
+      new Date(suivi.le).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) + ' à ' +
+      new Date(suivi.le).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) + '.');
+    trace.style.cssText = 'font-size:12px;color:#fcd34d;margin:-6px 0 10px;';
+    box.appendChild(trace);
+  }
+
   const lignes = el('p', null,
-    'Du ' + debut.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }) +
-    (admin ? '' : ' au ' + fin.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })));
+    'Du ' + debut.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }));
   lignes.style.cssText = 'font-size:14px;color:#e2e8f0;margin-bottom:6px;';
   box.appendChild(lignes);
 
-  let champ = null;
   const erreur = el('p', 'gate-error', '');
-  if (admin) {
-    const libelle = el('label', 'champ-label', 'Au (dernier jour compté) :');
-    champ = document.createElement('input');
-    champ.type = 'date';
-    champ.className = 'champ-date';
-    champ.value = cleJour(fin);
-    const premier = new Date(mois.getFullYear(), mois.getMonth(), 1);
-    champ.min = cleJour(debut > premier ? debut : premier);
-    champ.max = cleJour(new Date(mois.getFullYear(), mois.getMonth() + 1, 0));
-    // Toute la zone ouvre le calendrier, pas seulement la petite icône.
-    champ.addEventListener('click', () => { try { champ.showPicker(); } catch { /* ancien navigateur */ } });
-    box.append(libelle, champ, erreur);
-  }
+  const libelle = el('label', 'champ-label', 'Au (dernier jour compté) :');
+  const champ = document.createElement('input');
+  champ.type = 'date';
+  champ.className = 'champ-date';
+  champ.value = cleJour(fin);
+  const premier = new Date(mois.getFullYear(), mois.getMonth(), 1);
+  champ.min = cleJour(debut > premier ? debut : premier);
+  champ.max = cleJour(new Date(mois.getFullYear(), mois.getMonth() + 1, 0));
+  // Toute la zone ouvre le calendrier, pas seulement la petite icône.
+  champ.addEventListener('click', () => { try { champ.showPicker(); } catch { /* ancien navigateur */ } });
+  box.append(libelle, champ, erreur);
 
   const fermer = () => { libererFond(); modal.remove(); };
   const barre = el('div', 'modal-btns');
@@ -4395,10 +4403,17 @@ function reglerCloture() {
     if (message) showToast(message);
   };
 
-  if (admin && clotures()[cle]) {
+  if (clotures()[cle]) {
     const oublier = el('button', 'btn-cancel', 'Effacer');
     oublier.type = 'button';
-    oublier.addEventListener('click', () => {
+    oublier.addEventListener('click', async () => {
+      const ok2 = await showDialog({
+        title: 'Effacer la clôture ?',
+        message: 'La date sera effacée pour toute l’équipe ; le jour habituel sera de nouveau utilisé.',
+        okText: 'Effacer',
+        cancelText: 'Annuler'
+      });
+      if (!ok2) return;
       const nouvelles = { ...clotures() };
       delete nouvelles[cle];
       sauver(nouvelles, 'Clôture effacée');
@@ -4406,34 +4421,38 @@ function reglerCloture() {
     gauche.appendChild(oublier);
   }
 
-  if (admin) {
-    const annuler = el('button', 'btn-cancel', 'Annuler');
-    annuler.type = 'button';
-    annuler.addEventListener('click', fermer);
-    const ok = el('button', 'btn-save', 'Valider');
-    ok.type = 'button';
-    ok.addEventListener('click', async () => {
-      if (!champ.value) return;
-      const date = dateDe(champ.value);
-      // La période doit rester entre la clôture précédente et la suivante.
-      const suivante = finDePaie(new Date(mois.getFullYear(), mois.getMonth() + 1, 1));
-      if (date.getFullYear() !== mois.getFullYear() || date.getMonth() !== mois.getMonth()) {
-        erreur.textContent = 'La clôture de la ' + paieDe(mois).replace('Paie', 'paie') + ' doit tomber en ' + nomDuMois(mois) + '.';
-        return;
-      }
-      if (date < debut) { erreur.textContent = 'La clôture doit tomber après le ' + debut.toLocaleDateString('fr-FR') + '.'; return; }
-      if (date >= suivante) { erreur.textContent = 'La clôture doit tomber avant celle de la paie suivante (' + suivante.toLocaleDateString('fr-FR') + ').'; return; }
-      ok.disabled = true;
-      await sauver({ ...clotures(), [cle]: champ.value }, 'Clôture enregistrée pour toute l’équipe : ' + date.toLocaleDateString('fr-FR'));
-      ok.disabled = false;
-    });
-    droite.append(annuler, ok);
-  } else {
-    const ok = el('button', 'btn-save', 'Fermer');
-    ok.type = 'button';
-    ok.addEventListener('click', fermer);
-    droite.append(ok);
-  }
+  const annuler = el('button', 'btn-cancel', 'Annuler');
+  annuler.type = 'button';
+  annuler.addEventListener('click', fermer);
+  const ok = el('button', 'btn-save', 'Valider');
+  ok.type = 'button';
+  ok.addEventListener('click', async () => {
+    if (!champ.value) return;
+    const date = dateDe(champ.value);
+    // La période doit rester entre la clôture précédente et la suivante.
+    const suivante = finDePaie(new Date(mois.getFullYear(), mois.getMonth() + 1, 1));
+    if (date.getFullYear() !== mois.getFullYear() || date.getMonth() !== mois.getMonth()) {
+      erreur.textContent = 'La clôture de la ' + paieDe(mois).replace('Paie', 'paie') + ' doit tomber en ' + nomDuMois(mois) + '.';
+      return;
+    }
+    if (date < debut) { erreur.textContent = 'La clôture doit tomber après le ' + debut.toLocaleDateString('fr-FR') + '.'; return; }
+    if (date >= suivante) { erreur.textContent = 'La clôture doit tomber avant celle de la paie suivante (' + suivante.toLocaleDateString('fr-FR') + ').'; return; }
+    // Changer une date déjà saisie par quelqu'un touche toute l'équipe : on confirme.
+    if (clotures()[cle] && clotures()[cle] !== champ.value) {
+      const ok2 = await showDialog({
+        title: 'Modifier la clôture ?',
+        message: 'La clôture du ' + dateDe(clotures()[cle]).toLocaleDateString('fr-FR') +
+          (suivi ? ', saisie par ' + suivi.par + ',' : '') + ' passera au ' + date.toLocaleDateString('fr-FR') + ' pour toute l’équipe.',
+        okText: 'Modifier',
+        cancelText: 'Annuler'
+      });
+      if (!ok2) return;
+    }
+    ok.disabled = true;
+    await sauver({ ...clotures(), [cle]: champ.value }, 'Clôture enregistrée pour toute l’équipe : ' + date.toLocaleDateString('fr-FR'));
+    ok.disabled = false;
+  });
+  droite.append(annuler, ok);
   barre.append(gauche, droite);
   box.appendChild(barre);
   modal.appendChild(box);
