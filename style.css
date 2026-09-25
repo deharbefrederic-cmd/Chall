@@ -1204,3 +1204,24 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   color: #86efac;
   font-weight: 700;
 }
+
+/* --- iPhone : rappel d'installation dans l'onglet Bacs --- */
+
+.bacs-alerte-ios {
+  display: block;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #b45309;
+  border-radius: 10px;
+  background: #422006;
+  color: #fde68a;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bacs-alerte-ios[hidden] {
+  display: none;
+}

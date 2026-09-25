@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '26/09 — détail des primes du jour';
+const VERSION = '26/09 — iPhone';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -2152,8 +2152,47 @@ window.addEventListener('beforeinstallprompt', (e) => {
   }
 });
 
+/* ------------------------------ iPhone ------------------------------ */
+
+// Safari n'a pas de bouton d'installation automatique : on explique le geste.
+const estIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPad récent
+const estInstallee = () =>
+  window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+function expliquerInstallationIOS() {
+  return showDialog({
+    title: 'Installer sur iPhone',
+    message:
+      '1. Ouvrez l’appli dans Safari.\n' +
+      '2. Touchez le bouton Partager (le carré avec une flèche ⬆️), en bas de l’écran.\n' +
+      '3. Descendez et choisissez « Sur l’écran d’accueil ».\n' +
+      '4. Touchez « Ajouter ».\n\n' +
+      'L’icône Challivretou apparaît sur l’écran d’accueil. Ouvrez toujours l’appli par cette icône : ' +
+      'c’est ce qui protège vos comptages de bacs.',
+    showCancel: false,
+    okText: 'Compris'
+  });
+}
+
+if (estIOS && !estInstallee()) {
+  installBtn.style.display = 'inline-block';
+  if (!localStorage.getItem('pwa_prompt_shown') && getAccessKey()) {
+    localStorage.setItem('pwa_prompt_shown', 'true');
+    installPopupModal.style.display = 'flex';
+  }
+  // Dans l'onglet Bacs, un rappel : Safari efface les données des sites
+  // non installés au bout de 7 jours sans visite.
+  $('bacsAlerteIos').hidden = false;
+  $('bacsAlerteIos').addEventListener('click', expliquerInstallationIOS);
+}
+
 async function promptInstall() {
   installPopupModal.style.display = 'none';
+  if (!deferredPrompt && estIOS) {
+    await expliquerInstallationIOS();
+    return;
+  }
   if (!deferredPrompt) return;
   deferredPrompt.prompt();
   const { outcome } = await deferredPrompt.userChoice;

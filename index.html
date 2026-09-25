@@ -9,6 +9,11 @@
   <meta name="robots" content="noindex, nofollow">
   <link rel="icon" href="/icon-192.png">
   <link rel="apple-touch-icon" href="/icon-192.png">
+  <!-- iPhone : appli plein écran une fois ajoutée à l'écran d'accueil. -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Challivretou">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -42,6 +47,9 @@
 
 <!-- Compteur de bacs : tout reste sur le téléphone du livreur. -->
 <section id="bacsPanel" class="bacs" role="tabpanel" aria-labelledby="tabBacs" hidden>
+  <button type="button" class="bacs-alerte-ios" id="bacsAlerteIos" hidden>
+    ⚠️ Sur iPhone, ajoutez l'appli à l'écran d'accueil : sinon Safari peut effacer vos comptages après quelques jours sans l'ouvrir. <u>Comment faire</u>
+  </button>
   <div class="bacs-jour" id="bacsJour"></div>
   <div class="bacs-total"><span id="bacsTotal">0</span><small>bacs</small></div>
   <div class="bacs-sous" id="bacsSous"></div>
