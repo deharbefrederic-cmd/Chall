@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '26/09 — clôture pour tous';
+const VERSION = '26/09 — titre mois';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -4133,10 +4133,10 @@ function renderBacs() {
   const { debut, fin } = periodePaie(moisAffiche);
   const court = (d) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
   const exacte = Boolean(clotures()[cleMois(moisAffiche)]);
-  const decalee = exacte || clotureHabituelle() < 31 || Object.keys(clotures()).length > 0;
-  $('bacsMoisTitre').textContent = decalee ? paieDe(moisAffiche) : nomDuMois(moisAffiche);
+  $('bacsMoisTitre').textContent = nomDuMois(moisAffiche);
+  // Court, pour tenir sur une ligne : « du 27 août au 26 sept. · ✅ confirmée ✏️ ».
   $('bacsMoisDates').textContent = 'du ' + court(debut) + ' au ' + court(fin) + ' · ' +
-    (exacte ? '✅ clôture confirmée' : 'clôture estimée') + ' ✏️';
+    (exacte ? '✅ confirmée' : '⏳ estimée') + ' ✏️';
   $('bacsMoisSuiv').disabled = moisAffiche >= paieEnCours;
 
   const surDeuxMois = debut.getMonth() !== fin.getMonth();
