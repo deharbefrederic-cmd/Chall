@@ -8,7 +8,7 @@
 
 // Repère de version, affiché dans le panneau : permet de vérifier d'un coup
 // d'œil quelle version tourne réellement sur l'appareil.
-const VERSION = '25/09 — historique des bacs';
+const VERSION = '25/09 — primes en net';
 
 const CACHE_KEY = 'chall_cache_v2';
 const OUTBOX_KEY = 'chall_outbox_v2';
@@ -3638,6 +3638,23 @@ clientPhotoSuppr.addEventListener('click', () => {
 const BACS_KEY = 'chall_bacs_v1';
 const PALIERS = [75, 100, 150];
 const PAVE = [1, 2, 3, 4, 5, 6, 7, 8];
+// Prime brute du jour, selon le palier le plus haut atteint (non cumulées).
+const PRIMES_BRUT = { 75: 15, 100: 30, 150: 60 };
+
+// Taux pour estimer le net : cotisations salariales (≈ 22 % pour un
+// non-cadre) et, en option, le taux personnel de prélèvement à la source.
+// Réglables : ils figurent sur la fiche de paie.
+const TAUX_KEY = 'chall_bacs_taux_v1';
+let taux = { cotisations: 22, impot: 0, ...readJson(TAUX_KEY, {}) };
+
+const euros = (v) => {
+  const arrondi = Math.round(v * 100) / 100;
+  const cents = arrondi % 1 ? 2 : 0;
+  return arrondi.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: cents, maximumFractionDigits: cents });
+};
+const pct = (v) => v.toLocaleString('fr-FR') + ' %';
+const netDe = (brut) => brut * (1 - taux.cotisations / 100);
+const netApresImpot = (brut) => netDe(brut) * (1 - taux.impot / 100);
 
 let bacs = readJson(BACS_KEY, {});
 let moisAffiche = null; // premier jour du mois affiché dans le récap
@@ -3959,8 +3976,18 @@ function renderBacs() {
   };
   bilan.appendChild(caseBilan(somme, jours.length + ' jour' + (jours.length > 1 ? 's' : '') + ' · ' +
     (jours.length ? Math.round(somme / jours.length) : 0) + ' bacs / jour en moyenne', true));
-  PALIERS.forEach((p) => bilan.appendChild(caseBilan(parPalier[p], 'prime ' + p)));
+  PALIERS.forEach((p) => bilan.appendChild(caseBilan(parPalier[p], 'prime ' + p + ' · ' + euros(parPalier[p] * PRIMES_BRUT[p]))));
   $('bacsBilan').replaceChildren(bilan);
+
+  // Total des primes du mois : brut, net estimé, et net après impôt si renseigné.
+  const brut = PALIERS.reduce((a, p) => a + parPalier[p] * PRIMES_BRUT[p], 0);
+  const primes = $('bacsPrimes');
+  primes.replaceChildren(
+    el('span', 'titre', 'Primes du mois'),
+    el('strong', null, '≈ ' + euros(taux.impot ? netApresImpot(brut) : netDe(brut)) + ' net'),
+    el('span', 'detail', euros(brut) + ' brut · cotisations ' + pct(taux.cotisations) +
+      (taux.impot ? ' · impôt ' + pct(taux.impot) : '') + ' ✏️')
+  );
 
   const liste = document.createDocumentFragment();
   if (!jours.length) liste.appendChild(el('div', 'bacs-vide', 'Aucun bac compté ce mois-ci.'));
@@ -3972,7 +3999,7 @@ function renderBacs() {
     ligne.append(
       el('span', 'date', dateDe(k).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' }) + (bacs[k].c != null ? ' ✏️' : '')),
       el('span', 'nb', t + ' bacs'),
-      el('span', 'prime' + (p ? ' ok' : ''), p ? '✅ ' + p : '—')
+      el('span', 'prime' + (p ? ' ok' : ''), p ? '✅ ' + PRIMES_BRUT[p] + ' €' : '—')
     );
     ligne.addEventListener('click', () => montrerJour(k));
     liste.appendChild(ligne);
@@ -3989,16 +4016,22 @@ function renderBacs() {
 function exporterBacs() {
   const jours = joursDuMois(moisAffiche).reverse();
   const nomMois = moisAffiche.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-  const lignes = [['Date', 'Livraisons', 'Bacs', 'Palier atteint', 'Total corrige'].join(';')];
+  const lignes = [['Date', 'Livraisons', 'Bacs', 'Palier atteint', 'Prime brute (EUR)', 'Total corrige'].join(';')];
   jours.forEach((k) => {
     const j = bacs[k];
     const t = totalJour(j);
-    lignes.push([dateDe(k).toLocaleDateString('fr-FR'), nbLivraisons(j), t, palierAtteint(t) || '', j.c != null ? 'oui' : ''].join(';'));
+    const p = palierAtteint(t);
+    lignes.push([dateDe(k).toLocaleDateString('fr-FR'), nbLivraisons(j), t, p || '', p ? PRIMES_BRUT[p] : 0, j.c != null ? 'oui' : ''].join(';'));
   });
   const totaux = jours.map((k) => totalJour(bacs[k]));
   lignes.push('');
   lignes.push('Total du mois;;' + totaux.reduce((a, b) => a + b, 0));
   PALIERS.forEach((p) => lignes.push('Jours prime ' + p + ';;' + totaux.filter((t) => palierAtteint(t) === p).length));
+  const brut = totaux.reduce((a, t) => a + (palierAtteint(t) ? PRIMES_BRUT[palierAtteint(t)] : 0), 0);
+  const nombre = (v) => v.toFixed(2).replace('.', ',');
+  lignes.push('Primes brutes (EUR);;' + nombre(brut));
+  lignes.push('Primes nettes estimees (EUR), cotisations ' + pct(taux.cotisations) + ';;' + nombre(netDe(brut)));
+  if (taux.impot) lignes.push('Apres impot a la source ' + pct(taux.impot) + ' (EUR);;' + nombre(netApresImpot(brut)));
 
   const blob = new Blob(['﻿' + lignes.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -4012,6 +4045,56 @@ function exporterBacs() {
   showToast('Récap de ' + nomMois + ' exporté');
 }
 
+/** Réglage des taux servant à estimer le net. */
+function reglerTaux() {
+  const modal = el('div', 'modal');
+  modal.style.display = 'flex';
+  const box = el('div', 'modal-content');
+  box.appendChild(el('h3', null, 'Calcul du net'));
+  const aide = el('p', null,
+    'Les deux taux figurent sur votre fiche de paie. Cotisations : environ 22 % pour un salarié non-cadre. ' +
+    'Impôt : votre taux de prélèvement à la source, ou 0 pour le net avant impôt.');
+  aide.style.cssText = 'font-size:13px;color:#94a3b8;margin:4px 0 12px;line-height:1.4;';
+  box.appendChild(aide);
+
+  const champ = (libelle, valeur) => {
+    const l = el('label', 'champ-label', libelle);
+    const i = document.createElement('input');
+    i.type = 'text';
+    i.inputMode = 'decimal';
+    i.value = String(valeur).replace('.', ',');
+    box.append(l, i);
+    return i;
+  };
+  const cot = champ('Cotisations salariales (%)', taux.cotisations);
+  const imp = champ('Impôt prélevé à la source (%)', taux.impot);
+
+  const lire = (i, def) => {
+    const v = parseFloat(i.value.replace(',', '.'));
+    return Number.isFinite(v) && v >= 0 && v < 100 ? v : def;
+  };
+  const fin = () => { libererFond(); modal.remove(); };
+  const barre = el('div', 'modal-btns');
+  barre.style.cssText = 'justify-content:flex-end;gap:10px;';
+  const annuler = el('button', 'btn-cancel', 'Annuler');
+  annuler.type = 'button';
+  annuler.addEventListener('click', fin);
+  const ok = el('button', 'btn-save', 'Valider');
+  ok.type = 'button';
+  ok.addEventListener('click', () => {
+    taux = { cotisations: lire(cot, 22), impot: lire(imp, 0) };
+    writeJson(TAUX_KEY, taux);
+    fin();
+    renderBacs();
+  });
+  barre.append(annuler, ok);
+  box.appendChild(barre);
+  modal.appendChild(box);
+  document.body.appendChild(modal);
+  verrouillerFond();
+}
+
+$('bacsPrimes').addEventListener('click', reglerTaux);
 $('bacsAnnuler').addEventListener('click', annulerDerniere);
 $('bacsAutre').addEventListener('click', autreNombre);
 $('bacsExport').addEventListener('click', exporterBacs);

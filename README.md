@@ -125,6 +125,12 @@ Compteur personnel pour la prime de bacs journalière (paliers 75, 100 et
 atteint, permet de corriger un jour ou d'en saisir un oublié, et s'exporte
 en CSV pour comparer avec la fiche de paie.
 
+Primes brutes par jour, selon le palier le plus haut atteint (non
+cumulées) : 15 € (75 bacs), 30 € (100), 60 € (150). Le total du mois est
+converti en net estimé avec un taux de cotisations réglable (22 % par
+défaut) et, en option, le taux personnel de prélèvement à la source.
+Montants et paliers : constantes `PALIERS` et `PRIMES_BRUT` dans `app.js`.
+
 Les comptages restent **sur le téléphone** (stockage du navigateur) : rien
 n'est envoyé au serveur. Vider les données du site ou changer de téléphone
 les efface : exporter chaque mois pour en garder une copie.
